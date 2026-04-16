@@ -265,12 +265,12 @@ describe("MCP Server", () => {
             });
             mockClient.mockGet("/minMax", { cex: { min: 0.001, max: 100 } });
             mockClient.mockGet("/quotes", {
-                quotes: [{ quoteId: "q99", provider: "exolix", rate: 20, estimatedAmount: 2 }],
+                quotes: [{ quoteId: "q99", swapName: "Exolix", type: "standard", amountOut: 2 }],
             });
             mockClient.mockPost("/exchanges", {
                 houdiniId: "HOUDINI999",
-                status: "waiting",
-                addressFrom: "bc1qdeposit...",
+                status: 0,
+                depositAddress: "bc1qdeposit...",
             });
 
             const result = await mcpClient.callTool({
@@ -365,7 +365,7 @@ describe("MCP Server", () => {
             });
 
             const content = JSON.parse((result.content as any)[0].text);
-            expect(content.error).toContain("No quotes");
+            expect(content.error).toContain("No CEX quotes");
             expect(result.isError).toBe(true);
         });
     });

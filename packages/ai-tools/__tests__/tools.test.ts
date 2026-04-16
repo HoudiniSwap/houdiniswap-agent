@@ -158,12 +158,12 @@ describe("AI SDK tools", () => {
             });
             mockClient.mockGet("/minMax", { cex: { min: 0.001, max: 100 } });
             mockClient.mockGet("/quotes", {
-                quotes: [{ quoteId: "q99", provider: "exolix", rate: 20, estimatedAmount: 2 }],
+                quotes: [{ quoteId: "q99", swapName: "Exolix", type: "standard", amountOut: 2 }],
             });
             mockClient.mockPost("/exchanges", {
                 houdiniId: "HOUDINI999",
-                status: "waiting",
-                addressFrom: "bc1qdeposit...",
+                status: 0,
+                depositAddress: "bc1qdeposit...",
             });
 
             const result = await tools.swap.execute(
@@ -220,7 +220,7 @@ describe("AI SDK tools", () => {
                 },
                 { toolCallId: "t1", messages: [] },
             );
-            expect((result as any).error).toContain("No quotes");
+            expect((result as any).error).toContain("No CEX quotes");
         });
     });
 });
