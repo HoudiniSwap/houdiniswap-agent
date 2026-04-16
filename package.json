@@ -1,0 +1,20 @@
+{
+  "name": "houdiniswap-agent",
+  "private": true,
+  "packageManager": "npm@10.9.2",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "clean": "turbo run clean"
+  },
+  "devDependencies": {
+    "@ai-sdk/anthropic": "^3.0.69",
+    "turbo": "^2.4.0",
+    "typescript": "^5.7.0"
+  }
+}

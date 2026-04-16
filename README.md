@@ -1,0 +1,153 @@
+# HoudiniSwap Agent
+
+MCP Server + AI SDK Tools for [HoudiniSwap](https://houdiniswap.com) — agent-friendly crypto swap aggregation with x402 pay-per-use.
+
+## What is this?
+
+HoudiniSwap aggregates 14 CEXes and 20+ DEXes across multiple blockchains. This repo provides agent integration tools so AI assistants can discover, quote, and execute swaps programmatically.
+
+**Two packages:**
+
+| Package | Description | Install |
+|---------|-------------|---------|
+| `@houdiniswap/mcp-server` | MCP server for Claude, Cursor, ChatGPT | `npx @houdiniswap/mcp-server` |
+| `@houdiniswap/ai-tools` | Vercel AI SDK v6 tool definitions | `npm install @houdiniswap/ai-tools` |
+
+## Quick Start — MCP Server
+
+### With x402 (no signup needed)
+
+Pay per request with USDC on Base. No API key registration required.
+
+**Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "houdiniswap": {
+      "command": "npx",
+      "args": ["@houdiniswap/mcp-server"],
+      "env": {
+        "HOUDINI_X402_PRIVATE_KEY": "0xYOUR_WALLET_PRIVATE_KEY"
+      }
+    }
+  }
+}
+```
+
+**Cursor** (`.cursor/mcp.json`):
+```json
+{
+  "mcpServers": {
+    "houdiniswap": {
+      "command": "npx",
+      "args": ["@houdiniswap/mcp-server"],
+      "env": {
+        "HOUDINI_X402_PRIVATE_KEY": "0xYOUR_WALLET_PRIVATE_KEY"
+      }
+    }
+  }
+}
+```
+
+**Claude Code:**
+```bash
+claude mcp add houdiniswap -- npx @houdiniswap/mcp-server
+# Set env: HOUDINI_X402_PRIVATE_KEY=0x...
+```
+
+### With API Key (for partners)
+
+```json
+{
+  "env": {
+    "HOUDINI_API_KEY": "YOUR_PARTNER_ID:YOUR_SECRET"
+  }
+}
+```
+
+### HTTP Transport (for remote agents)
+
+```bash
+npx @houdiniswap/mcp-server --transport=http
+# Listens on port 8080 (override with PORT env var)
+```
+
+## Available Tools
+
+### Core Tools
+
+| Tool | Cost (x402) | Description |
+|------|-------------|-------------|
+| `getTokens` | $0.0001 | Search tokens by symbol, chain, address |
+| `getChains` | $0.0001 | List supported blockchains |
+| `getSwapProviders` | $0.0001 | List CEX + DEX providers |
+| `getMinMax` | $0.0001 | Min/max amounts for a token pair |
+| `getQuote` | $0.001 | Get swap quotes from multiple providers |
+| `createExchange` | $0.01 | Create a swap order |
+| `getOrder` | $0.0001 | Check order status |
+| `getOrders` | $0.0001 | List orders with filters |
+
+### DEX Tools
+
+| Tool | Cost | Description |
+|------|------|-------------|
+| `dexApprove` | $0.0001 | Get token approval data |
+| `dexCheckAllowance` | $0.0001 | Check token allowance |
+| `dexConfirmTx` | $0.01 | Confirm DEX transaction |
+| `dexChainSignatures` | $0.0001 | Multi-step signature chain |
+
+### Composite Tool
+
+| Tool | Cost | Description |
+|------|------|-------------|
+| `swap` | ~$0.012 | Full swap flow: find tokens, validate amount, get best quote, create exchange |
+
+## x402 Pay-Per-Use
+
+The x402 protocol enables pay-per-request API access with USDC on Base. No account registration needed — just a wallet with USDC.
+
+**How it works:**
+1. Agent makes a request → gets `402 Payment Required`
+2. Agent signs a USDC `transferWithAuthorization` (gasless, EIP-3009)
+3. Agent retries with payment proof → gets the data
+
+**Costs:** A complete swap flow costs ~$0.012 USDC (~1.2 cents).
+
+**Rate limit:** 60 requests/minute per payer address.
+
+## Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `HOUDINI_X402_PRIVATE_KEY` | One of these | — | EVM wallet private key for x402 payments |
+| `HOUDINI_API_KEY` | required | — | Partner API key (`id:secret`) |
+| `HOUDINI_PARTNER_ID` | | — | Public partner ID (read-only access) |
+| `HOUDINI_API_URL` | No | `https://api-partner.houdiniswap.com/v2` | API base URL |
+| `PORT` | No | `8080` | HTTP transport port |
+
+## Development
+
+```bash
+# Install
+npm install
+
+# Build
+npm run build
+
+# Test
+npm run test
+
+# Run MCP server locally (stdio)
+node packages/mcp-server/dist/index.js
+```
+
+## Resources
+
+- [HoudiniSwap API Docs](https://docs.houdiniswap.com/api-reference/)
+- [x402 Payments Guide](https://docs.houdiniswap.com/docs/v2/x402-payments)
+- [x402 Protocol (Coinbase)](https://docs.cdp.coinbase.com/x402/welcome)
+- [MCP Specification](https://modelcontextprotocol.io/)
+
+## License
+
+MIT

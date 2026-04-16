@@ -1,0 +1,29 @@
+{
+  "name": "@houdiniswap/agent-shared",
+  "version": "0.1.0",
+  "description": "Shared HoudiniSwap API client and types for AI agent integrations",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@x402/core": "^2.7.0",
+    "@x402/evm": "^2.7.0",
+    "viem": "^2.39.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
