@@ -3,6 +3,28 @@
   "version": "0.1.0",
   "description": "HoudiniSwap tools for Vercel AI SDK — connect AI agents to 14 CEXes and 20+ DEXes",
   "type": "module",
+  "license": "MIT",
+  "author": "HoudiniSwap (https://houdiniswap.com)",
+  "homepage": "https://github.com/HoudiniSwap/houdiniswap-agent#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HoudiniSwap/houdiniswap-agent.git",
+    "directory": "packages/ai-tools"
+  },
+  "bugs": "https://github.com/HoudiniSwap/houdiniswap-agent/issues",
+  "keywords": [
+    "houdiniswap",
+    "vercel-ai-sdk",
+    "ai-sdk",
+    "crypto",
+    "swap",
+    "bridge",
+    "x402",
+    "ai-agent"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist"
   ],
@@ -19,15 +41,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@houdiniswap/agent-shared": "*",
+    "@houdiniswap/agent-shared": "^0.1.0",
     "ai": "^6.0.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
-  },
-  "peerDependencies": {
-    "ai": "^6.0.0"
   }
 }

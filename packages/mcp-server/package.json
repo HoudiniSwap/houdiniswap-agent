@@ -3,6 +3,28 @@
   "version": "0.1.0",
   "description": "HoudiniSwap MCP server — connect AI agents to 14 CEXes and 20+ DEXes via Model Context Protocol",
   "type": "module",
+  "license": "MIT",
+  "author": "HoudiniSwap (https://houdiniswap.com)",
+  "homepage": "https://github.com/HoudiniSwap/houdiniswap-agent#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HoudiniSwap/houdiniswap-agent.git",
+    "directory": "packages/mcp-server"
+  },
+  "bugs": "https://github.com/HoudiniSwap/houdiniswap-agent/issues",
+  "keywords": [
+    "houdiniswap",
+    "mcp",
+    "model-context-protocol",
+    "crypto",
+    "swap",
+    "bridge",
+    "x402",
+    "ai-agent"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist"
   ],
@@ -23,7 +45,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@houdiniswap/agent-shared": "*",
+    "@houdiniswap/agent-shared": "^0.1.0",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "express": "^4.21.0",
     "zod": "^3.24.0"

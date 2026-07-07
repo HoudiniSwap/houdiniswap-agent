@@ -10,7 +10,7 @@ HoudiniSwap aggregates 14 CEXes and 20+ DEXes across multiple blockchains. This 
 
 | Package | Description | Install |
 |---------|-------------|---------|
-| `@houdiniswap/mcp-server` | MCP server for Claude, Cursor, ChatGPT | `npx @houdiniswap/mcp-server` |
+| `@houdiniswap/mcp-server` | MCP server for Claude, Cursor, ChatGPT | `npx -y @houdiniswap/mcp-server` |
 | `@houdiniswap/ai-tools` | Vercel AI SDK v6 tool definitions | `npm install @houdiniswap/ai-tools` |
 
 ## Quick Start — MCP Server
@@ -25,7 +25,7 @@ Pay per request with USDC on Base. No API key registration required.
   "mcpServers": {
     "houdiniswap": {
       "command": "npx",
-      "args": ["@houdiniswap/mcp-server"],
+      "args": ["-y", "@houdiniswap/mcp-server"],
       "env": {
         "HOUDINI_X402_PRIVATE_KEY": "0xYOUR_WALLET_PRIVATE_KEY"
       }
@@ -40,7 +40,7 @@ Pay per request with USDC on Base. No API key registration required.
   "mcpServers": {
     "houdiniswap": {
       "command": "npx",
-      "args": ["@houdiniswap/mcp-server"],
+      "args": ["-y", "@houdiniswap/mcp-server"],
       "env": {
         "HOUDINI_X402_PRIVATE_KEY": "0xYOUR_WALLET_PRIVATE_KEY"
       }
@@ -49,11 +49,17 @@ Pay per request with USDC on Base. No API key registration required.
 }
 ```
 
-**Claude Code:**
+**Claude Code — MCP server only:**
 ```bash
-claude mcp add houdiniswap -- npx @houdiniswap/mcp-server
-# Set env: HOUDINI_X402_PRIVATE_KEY=0x...
+claude mcp add houdiniswap --env HOUDINI_X402_PRIVATE_KEY=0x... -- npx -y @houdiniswap/mcp-server
 ```
+
+**Claude Code — plugin (skill + MCP server in one install):**
+```bash
+/plugin marketplace add HoudiniSwap/houdiniswap-agent
+/plugin install houdiniswap@houdiniswap
+```
+Installs the HoudiniSwap swap-agent skill **and** wires up the MCP server. Set `HOUDINI_X402_PRIVATE_KEY` in your environment for x402 payments (optional — the server runs read-only without it).
 
 ### With API Key (for partners)
 
@@ -68,7 +74,7 @@ claude mcp add houdiniswap -- npx @houdiniswap/mcp-server
 ### HTTP Transport (for remote agents)
 
 ```bash
-npx @houdiniswap/mcp-server --transport=http
+npx -y @houdiniswap/mcp-server --transport=http
 # Listens on port 8080 (override with PORT env var)
 ```
 

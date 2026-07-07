@@ -3,6 +3,26 @@
   "version": "0.1.0",
   "description": "Shared HoudiniSwap API client and types for AI agent integrations",
   "type": "module",
+  "license": "MIT",
+  "author": "HoudiniSwap (https://houdiniswap.com)",
+  "homepage": "https://github.com/HoudiniSwap/houdiniswap-agent#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HoudiniSwap/houdiniswap-agent.git",
+    "directory": "packages/shared"
+  },
+  "bugs": "https://github.com/HoudiniSwap/houdiniswap-agent/issues",
+  "keywords": [
+    "houdiniswap",
+    "crypto",
+    "swap",
+    "bridge",
+    "x402",
+    "ai-agent"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist"
   ],
