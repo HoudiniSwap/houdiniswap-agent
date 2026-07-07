@@ -1,0 +1,18 @@
+{
+  "name": "houdiniswap",
+  "owner": {
+    "name": "HoudiniSwap",
+    "url": "https://houdiniswap.com"
+  },
+  "metadata": {
+    "description": "Official HoudiniSwap marketplace — crypto swap agent tooling (skill + MCP server) for 14 CEXes and 20+ DEXes with x402 pay-per-call.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "houdiniswap",
+      "source": "./plugins/houdiniswap",
+      "description": "Crypto swap agent — quote and execute swaps across 14 CEXes + 20 DEXes via HoudiniSwap, with x402 pay-per-call. Bundles the swap skill and the MCP server."
+    }
+  ]
+}
