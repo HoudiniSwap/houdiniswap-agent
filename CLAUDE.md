@@ -59,7 +59,7 @@ Three packages under `packages/`, all ESM (`"type": "module"`, `moduleResolution
 
 `HoudiniClient` (`packages/shared/src/client.ts`) is a thin `fetch` wrapper: `get(path, params)` builds a query string (skipping null/undefined, expanding arrays); `post(path, body)` sends JSON; both throw `HoudiniApiError` on non-2xx. Auth is a tagged union (`HoudiniAuth`): `apiKey` → `Authorization` header, `partnerId` → `partner-id` header, `x402` → swaps in the x402 fetch wrapper, `none` → no headers.
 
-The MCP entrypoint resolves auth from env vars with this precedence (`packages/mcp-server/src/index.ts`): `HOUDINI_API_KEY` > `HOUDINI_X402_PRIVATE_KEY` > `HOUDINI_PARTNER_ID` > none. Base URL defaults to `https://api-partner.houdiniswap.com/v2` (override with `HOUDINI_API_URL`).
+The MCP entrypoint resolves auth from env vars with this precedence (`packages/mcp-server/src/auth.ts`): `HOUDINI_API_KEY` > `HOUDINI_X402_PRIVATE_KEY` > `HOUDINI_PARTNER_ID` > none. Base URL defaults to `https://api-partner.houdiniswap.com/v2` (override with `HOUDINI_API_URL`).
 
 ### x402 payment flow
 

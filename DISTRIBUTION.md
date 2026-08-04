@@ -57,7 +57,9 @@ claude mcp add houdiniswap --env HOUDINI_X402_PRIVATE_KEY=0x... -- npx -y @houdi
 
 - The `bin` is named `houdiniswap-mcp`, but since it's the package's only bin,
   `npx @houdiniswap/mcp-server` resolves to it — no rename needed.
-- The plugin passes the x402 key through the environment (`${HOUDINI_X402_PRIVATE_KEY}`). To prompt
-  the user for it interactively instead, switch to a `userConfig` block in `plugin.json`.
-- The MCP server runs read-only (no-auth) if `HOUDINI_X402_PRIVATE_KEY` is unset — x402 payments
-  only kick in when the key is present.
+- The plugin prompts for the x402 key via a `userConfig` block in `plugin.json` and passes it to the
+  server as `HOUDINI_X402_PRIVATE_KEY`. It is marked `sensitive`, so Claude Code masks the input and
+  stores it in the OS keychain rather than `settings.json`. Leaving it empty is supported.
+- The MCP server runs read-only (no-auth) when no usable key is supplied — x402 payments only kick in
+  when a well-formed key is present. A malformed or unsubstituted value is ignored with a warning on
+  stderr rather than crashing the server (see `packages/mcp-server/src/auth.ts`).
