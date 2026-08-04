@@ -18,12 +18,14 @@
 
 ## Step 1: Create npm Organization
 
-```bash
-# Login to npm
-npm login
+The org must be created on the website — the npm CLI has no `org create` subcommand (only
+`npm org set|rm|ls`). Go to https://www.npmjs.com/org/create and register `houdiniswap`; the
+scope has to match the org name exactly. Then log in and confirm membership:
 
-# Create the @houdiniswap org (if not exists)
-npm org create houdiniswap
+```bash
+npm login                    # browser-based; the account needs 2FA to publish
+npm whoami
+npm org ls houdiniswap
 ```
 
 ## Step 2: Build All Packages
