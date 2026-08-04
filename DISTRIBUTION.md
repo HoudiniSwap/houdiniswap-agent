@@ -59,7 +59,12 @@ claude mcp add houdiniswap --env HOUDINI_X402_PRIVATE_KEY=0x... -- npx -y @houdi
   `npx @houdiniswap/mcp-server` resolves to it — no rename needed.
 - The plugin prompts for the x402 key via a `userConfig` block in `plugin.json` and passes it to the
   server as `HOUDINI_X402_PRIVATE_KEY`. It is marked `sensitive`, so Claude Code masks the input and
-  stores it in the OS keychain rather than `settings.json`. Leaving it empty is supported.
-- The MCP server runs read-only (no-auth) when no usable key is supplied — x402 payments only kick in
-  when a well-formed key is present. A malformed or unsubstituted value is ignored with a warning on
-  stderr rather than crashing the server (see `packages/mcp-server/src/auth.ts`).
+  stores it in the OS keychain rather than `settings.json`. Both `0x`-prefixed and bare 64-hex keys
+  are accepted, since MetaMask exports without the prefix.
+- The MCP server starts without a key, but it cannot fetch anything: `GET /status` is the only public
+  route and no tool maps to it, so every tool returns 402. "Read-only mode" means the process comes up
+  cleanly, not that lookups work. A malformed or unsubstituted key is ignored with a warning on stderr
+  rather than crashing the server (see `packages/mcp-server/src/auth.ts`).
+- Tool responses are shaped for agents, not browsers (`packages/mcp-server/src/shape.ts`): token
+  descriptions and icons are stripped, and `getQuote` keeps the best 5 per type while reporting how
+  many it omitted. Pass `verbose: true` to any tool for the raw API response.

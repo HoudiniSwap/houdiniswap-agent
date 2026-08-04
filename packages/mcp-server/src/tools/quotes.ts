@@ -1,11 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { HoudiniClient, QuoteResult } from "@houdiniswap/agent-shared";
 import { z } from "zod";
+import { asToolResult, compactQuoteResult } from "../shape.js";
 
 export const registerQuoteTools = (server: McpServer, client: HoudiniClient) => {
     server.tool(
         "getQuote",
-        "Get swap quotes for a token pair and amount. Returns quotes from multiple CEX and DEX providers, sorted by best rate. Use token IDs from getTokens.",
+        "Get swap quotes for a token pair and amount. Returns the best quotes from CEX and DEX providers, sorted by best rate. Use token IDs from getTokens.",
         {
             from: z.string().describe("Source token ID (from getTokens)"),
             to: z.string().describe("Destination token ID (from getTokens)"),
@@ -16,12 +17,13 @@ export const registerQuoteTools = (server: McpServer, client: HoudiniClient) => 
             receiverAddress: z.string().optional().describe("Receiver wallet address"),
             sort: z.enum(["amountOut", "amountOutUsd", "duration"]).optional().describe("Sort quotes by"),
             sortOrder: z.enum(["asc", "desc"]).optional().describe("Sort direction"),
+            limitPerType: z.number().int().min(1).max(50).default(5).optional().describe("Best quotes to keep per type (default 5). A pair can return 100+ quotes; the response reports how many were omitted."),
+            verbose: z.boolean().optional().describe("Return the full unfiltered API response"),
         },
-        async (params) => {
+        async ({ limitPerType, verbose, ...params }) => {
             const result = await client.get<QuoteResult>("/quotes", params);
-            return {
-                content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-            };
+            if (verbose) return asToolResult(result);
+            return asToolResult(compactQuoteResult(result, limitPerType ?? 5));
         },
     );
 };

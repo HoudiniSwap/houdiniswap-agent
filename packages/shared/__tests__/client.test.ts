@@ -171,6 +171,53 @@ describe("HoudiniClient", () => {
             }
         });
 
+        it("explains a 402 with an empty body when no key is configured", async () => {
+            // The x402 middleware answers with `{}`, which used to render as
+            // "HTTP 402: Unknown error" — the most common failure, unexplained.
+            mockFetch.mockResolvedValueOnce(jsonResponse({}, 402));
+            const client = new HoudiniClient({ auth: { type: "none" } });
+
+            try {
+                await client.get("/chains");
+                expect.unreachable("Should have thrown");
+            } catch (err) {
+                const apiErr = err as HoudiniApiError;
+                expect(apiErr.status).toBe(402);
+                expect(apiErr.message).not.toContain("Unknown error");
+                expect(apiErr.message).toContain("HOUDINI_X402_PRIVATE_KEY");
+                expect(apiErr.message).toContain("USDC on Base");
+            }
+        });
+
+        // The x402 auth path wraps fetch in the payment client, so driving it
+        // through HoudiniClient would mean simulating a full 402 challenge and
+        // settlement. The message itself is what matters here.
+        it("explains a 402 differently when a wallet is configured", () => {
+            const err = new HoudiniApiError(402, {}, "x402");
+            expect(err.message).toContain("not accepted");
+            expect(err.message).toContain("USDC on Base");
+            expect(err.message).not.toContain("Unknown error");
+        });
+
+        it("names the USDC contract so a wrong-chain balance is diagnosable", () => {
+            const err = new HoudiniApiError(402, {}, "x402");
+            expect(err.message).toContain("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913");
+        });
+
+        it("still prefers a server-supplied message on 402", async () => {
+            mockFetch.mockResolvedValueOnce(
+                jsonResponse({ code: "RATE_LIMIT", message: "Too many payments" }, 402),
+            );
+            const client = new HoudiniClient({ auth: { type: "none" } });
+
+            try {
+                await client.get("/chains");
+                expect.unreachable("Should have thrown");
+            } catch (err) {
+                expect((err as HoudiniApiError).message).toContain("Too many payments");
+            }
+        });
+
         it("handles non-JSON error body gracefully", async () => {
             mockFetch.mockResolvedValueOnce(
                 new Response("Internal Server Error", { status: 500 }),

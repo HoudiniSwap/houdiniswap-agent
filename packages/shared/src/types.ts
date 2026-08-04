@@ -16,8 +16,10 @@ export interface ApiResponse<T = unknown> {
 }
 
 export interface ApiError {
-    code: string;
-    message: string;
+    /** Absent on some responses — the x402 middleware returns an empty body. */
+    code?: string;
+    /** Absent on some responses — see `code`. */
+    message?: string;
     requestId?: string;
     fields?: Record<string, { message: string; value?: unknown }>;
 }

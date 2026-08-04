@@ -1,6 +1,8 @@
 import type { HoudiniAuth } from "@houdiniswap/agent-shared";
 
-const PRIVATE_KEY_PATTERN = /^0x[0-9a-fA-F]{64}$/;
+// MetaMask's "Show private key" exports 64 bare hex characters with no 0x, and
+// that is how most people obtain a key. Accept both and normalise.
+const PRIVATE_KEY_PATTERN = /^(0x)?[0-9a-fA-F]{64}$/;
 const UNEXPANDED_PLACEHOLDER = /^\$\{.*\}$/;
 
 /**
@@ -23,7 +25,8 @@ export const getAuthConfig = (): HoudiniAuth => {
 
     if (x402Key) {
         if (PRIVATE_KEY_PATTERN.test(x402Key)) {
-            return { type: "x402", privateKey: x402Key as `0x${string}` };
+            const normalised = x402Key.startsWith("0x") ? x402Key : `0x${x402Key}`;
+            return { type: "x402", privateKey: normalised as `0x${string}` };
         }
         // A malformed key would throw inside viem before the transport is
         // connected, which surfaces to the client as an unexplained

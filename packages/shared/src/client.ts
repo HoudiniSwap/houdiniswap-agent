@@ -54,7 +54,7 @@ export class HoudiniClient {
 
         if (!res.ok) {
             const error = await res.json().catch(() => ({})) as ApiError;
-            throw new HoudiniApiError(res.status, error);
+            throw new HoudiniApiError(res.status, error, this.auth.type);
         }
 
         return res.json() as Promise<T>;
@@ -73,7 +73,7 @@ export class HoudiniClient {
 
         if (!res.ok) {
             const error = await res.json().catch(() => ({})) as ApiError;
-            throw new HoudiniApiError(res.status, error);
+            throw new HoudiniApiError(res.status, error, this.auth.type);
         }
 
         return res.json() as Promise<T>;
@@ -84,15 +84,33 @@ export class HoudiniClient {
     }
 }
 
+const USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+
+/**
+ * The x402 middleware answers with an empty body, so the generic path would
+ * render the single most common failure as "HTTP 402: Unknown error". Say what
+ * to actually do about it instead.
+ */
+const paymentRequiredMessage = (authType?: HoudiniAuth["type"]): string => {
+    if (authType === "x402") {
+        return `HTTP 402: payment was attempted but not accepted. Check that the x402 wallet holds USDC on Base (${USDC_BASE}) — USDC on any other chain cannot pay for this API.`;
+    }
+    return "HTTP 402: this endpoint is pay-per-call and no payment method is configured. Set HOUDINI_X402_PRIVATE_KEY to the private key of a wallet holding USDC on Base, or authenticate with HOUDINI_API_KEY.";
+};
+
 export class HoudiniApiError extends Error {
     constructor(
         public readonly status: number,
         public readonly error: ApiError,
+        authType?: HoudiniAuth["type"],
     ) {
         const details = error.fields
             ? ` — ${Object.entries(error.fields).map(([k, v]) => `${k}: ${v.message}`).join(", ")}`
             : "";
-        super(`${error.code || "HTTP"} ${status}: ${error.message || "Unknown error"}${details}`);
+        const message = status === 402 && !error.message
+            ? paymentRequiredMessage(authType)
+            : `${error.code || "HTTP"} ${status}: ${error.message || "Unknown error"}${details}`;
+        super(message);
         this.name = "HoudiniApiError";
     }
 }
