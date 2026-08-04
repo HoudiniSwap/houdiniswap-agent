@@ -2,7 +2,7 @@
   "name": "houdiniswap",
   "displayName": "HoudiniSwap Swap Agent",
   "description": "Discover, quote, and execute crypto swaps across 14 CEXes and 20+ DEXes via HoudiniSwap, with x402 pay-per-call (USDC on Base — no signup).",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": {
     "name": "HoudiniSwap",
     "url": "https://houdiniswap.com"
@@ -11,12 +11,20 @@
   "repository": "https://github.com/HoudiniSwap/houdiniswap-agent",
   "license": "MIT",
   "keywords": ["crypto", "swap", "bridge", "defi", "cex", "dex", "x402"],
+  "userConfig": {
+    "x402_private_key": {
+      "type": "string",
+      "title": "x402 wallet private key",
+      "description": "Optional. A 0x-prefixed 32-byte hex key holding USDC on Base, used to pay per API call. Leave empty to run read-only — token, chain and quote lookups still work.",
+      "sensitive": true
+    }
+  },
   "mcpServers": {
     "houdiniswap": {
       "command": "npx",
       "args": ["-y", "@houdiniswap/mcp-server"],
       "env": {
-        "HOUDINI_X402_PRIVATE_KEY": "${HOUDINI_X402_PRIVATE_KEY}"
+        "HOUDINI_X402_PRIVATE_KEY": "${user_config.x402_private_key}"
       }
     }
   }

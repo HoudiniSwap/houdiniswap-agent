@@ -2,17 +2,7 @@
 import { createMcpServer } from "./server.js";
 import { HoudiniClient } from "@houdiniswap/agent-shared";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-
-const getAuthConfig = () => {
-    const apiKey = process.env.HOUDINI_API_KEY;
-    const x402Key = process.env.HOUDINI_X402_PRIVATE_KEY;
-    const partnerId = process.env.HOUDINI_PARTNER_ID;
-
-    if (apiKey) return { type: "apiKey" as const, key: apiKey };
-    if (x402Key) return { type: "x402" as const, privateKey: x402Key as `0x${string}` };
-    if (partnerId) return { type: "partnerId" as const, id: partnerId };
-    return { type: "none" as const };
-};
+import { getAuthConfig } from "./auth.js";
 
 const main = async () => {
     const baseUrl = process.env.HOUDINI_API_URL;
