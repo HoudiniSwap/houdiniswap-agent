@@ -277,16 +277,24 @@ Allow the user to:
 
 1. **Always use token `id`** (ObjectId) from getTokens — never pass raw symbols to getQuote/createExchange
 2. **Always prefer `mainnet: true` tokens** — chain-specific variants (cexTokenId like "ETHETH") may not be recognized by CEX providers
-3. **Always show the deposit address** after creating an exchange — this is where the user sends funds
-4. **Always show the route selection menu** with numbered options — let the user pick
-5. **Always check for unverified tokens** and warn before proceeding
-6. **Always calculate price impact** and warn if > 2%
-7. **Check min/max** before quoting if the user's amount might be near limits
-8. **For DEX**: always require `addressFrom` (sender wallet) and `senderAddress` in quotes
-9. **For chains needing memo/tag** (XRP, XLM, ATOM): always ask for and pass `destinationTag`
-10. **Fallback**: CEX exchanges auto-fallback to the next best provider if the primary one fails
-11. **Quote expiry**: Quotes expire after ~60 seconds — create the exchange promptly after getting a quote
-12. **Never expose** private keys, API secrets, or internal partner IDs to the user
+3. **After creating an exchange, show the right thing for the swap type.** For CEX orders
+   (`isDex` absent/false) show `depositAddress` — that is where the user sends funds. For DEX
+   orders (`isDex: true`) there is nothing to deposit: show `metadata` (`to`, `data`, `value`) as
+   the transaction to sign. A DEX order's `depositAddress` echoes the sender's own address, so
+   presenting it as "send funds here" is wrong and confusing.
+4. **Read symbols from `inToken.symbol` / `outToken.symbol`, never `inSymbol` / `outSymbol`.**
+   On DEX orders the API returns token IDs in the `inSymbol`/`outSymbol` fields
+   (`"6689b757c90e45f3b3e51805"` instead of `"USDC"`). The embedded token objects are always
+   correct.
+5. **Always show the route selection menu** with numbered options — let the user pick
+6. **Always check for unverified tokens** and warn before proceeding
+7. **Always calculate price impact** and warn if > 2%
+8. **Check min/max** before quoting if the user's amount might be near limits
+9. **For DEX**: always require `addressFrom` (sender wallet) and `senderAddress` in quotes
+10. **For chains needing memo/tag** (XRP, XLM, ATOM): always ask for and pass `destinationTag`
+11. **Fallback**: CEX exchanges auto-fallback to the next best provider if the primary one fails
+12. **Quote expiry**: Quotes expire after ~60 seconds — create the exchange promptly after getting a quote
+13. **Never expose** private keys, API secrets, or internal partner IDs to the user
 
 ## Order Statuses
 
