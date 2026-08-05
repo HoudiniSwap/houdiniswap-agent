@@ -1,5 +1,31 @@
 # Publishing Guide
 
+## Releases are automatic
+
+**To release: bump the version in the package's `package.json` in your PR, and merge to `main`.**
+`.github/workflows/publish.yml` builds, tests, and then publishes only the packages whose version
+differs from the registry, in dependency order (`agent-shared` → `mcp-server` → `ai-tools`).
+Merging a PR that touches no version publishes nothing.
+
+Auth is npm **trusted publishing** (OIDC): npm trusts the workflow's identity, so there is no
+`NPM_TOKEN` to store or rotate and the account's hardware security key is never involved — which
+is what made manual publishing awkward, since the browser approval needs a real TTY. Provenance
+attestations are generated automatically.
+
+One-time setup on npmjs.com, **per package** (`agent-shared`, `mcp-server`, `ai-tools`):
+
+> Package → Settings → Trusted Publisher → GitHub Actions
+> - Organization or user: `HoudiniSwap`
+> - Repository: `houdiniswap-agent`
+> - Workflow filename: `publish.yml`
+> - Allowed actions: `npm publish`
+
+Until a package has this configured, the workflow fails on that package. Requires npm >= 11.5.1
+and Node >= 22.14.0, both pinned in the workflow.
+
+The rest of this document is the **manual fallback** — for the first publish of a brand-new
+package, or if CI is unavailable.
+
 ## Prerequisites
 
 1. npm account with access to `@houdiniswap` org
