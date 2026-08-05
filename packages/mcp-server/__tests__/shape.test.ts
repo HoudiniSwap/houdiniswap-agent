@@ -1,0 +1,193 @@
+import { describe, it, expect } from "vitest";
+import {
+    compactToken,
+    compactQuoteResult,
+    compactOrder,
+    compactTokenResult,
+    compactOrderList,
+    asToolResult,
+} from "../src/shape.js";
+
+const token = {
+    id: "6689b73ec90e45f3b3e51566",
+    symbol: "ETH",
+    name: "Ethereum",
+    chain: "ethereum",
+    address: null,
+    decimals: 18,
+    mainnet: true,
+    hasCex: true,
+    hasDex: true,
+    hasSelfPrivate: true,
+    price: 1865.01,
+    description: "Ethereum is a global, open-source platform ...".repeat(20),
+    icon: "https://api.houdiniswap.com/assets/tokens/ETH-ETH-lejbdy.png",
+    cexTokenId: "ETH",
+    marketCap: 224731582752,
+    volume: 6979025899,
+    circulatingSupply: 120682209.8895669,
+    chainData: { name: "Ethereum Mainnet", chainId: 1, icon: "…", description: "…" },
+};
+
+const quote = (type: string, amountOut: number) => ({
+    quoteId: `q-${type}-${amountOut}`,
+    swap: "nx",
+    swapName: "Nexchange",
+    type,
+    amountIn: 0.5,
+    amountOut,
+    amountOutUsd: amountOut * 73.6,
+    duration: 6,
+    logoUrl: "https://api.houdiniswap.com/assets/logos/nexchange-eu55lk.png",
+    rewardsAvailable: true,
+});
+
+describe("compactToken", () => {
+    it("keeps the fields an agent acts on", () => {
+        const out = compactToken(token) as Record<string, unknown>;
+        expect(out.id).toBe(token.id);
+        expect(out.symbol).toBe("ETH");
+        expect(out.chain).toBe("ethereum");
+        expect(out.decimals).toBe(18);
+        expect(out.price).toBe(1865.01);
+        expect(out.hasDex).toBe(true);
+    });
+
+    it("drops description, icon and market noise", () => {
+        const out = compactToken(token) as Record<string, unknown>;
+        expect(out.description).toBeUndefined();
+        expect(out.icon).toBeUndefined();
+        expect(out.marketCap).toBeUndefined();
+        expect(out.volume).toBeUndefined();
+        expect(out.circulatingSupply).toBeUndefined();
+        expect(out.chainData).toBeUndefined();
+    });
+
+    it("lifts chainId out of chainData", () => {
+        expect((compactToken(token) as Record<string, unknown>).chainId).toBe(1);
+    });
+
+    it("is dramatically smaller than the original", () => {
+        const before = JSON.stringify(token).length;
+        const after = JSON.stringify(compactToken(token)).length;
+        expect(after).toBeLessThan(before / 4);
+    });
+
+    it("passes through non-objects untouched", () => {
+        expect(compactToken(null)).toBeNull();
+        expect(compactToken("nope")).toBe("nope");
+    });
+});
+
+describe("compactQuoteResult", () => {
+    const result = {
+        total: 145,
+        quotes: [
+            ...Array.from({ length: 7 }, (_, i) => quote("standard", 12.6 - i * 0.01)),
+            ...Array.from({ length: 138 }, (_, i) => quote("private", 12.5 - i * 0.001)),
+        ],
+    };
+
+    it("keeps the best N of each type", () => {
+        const out = compactQuoteResult(result, 5) as any;
+        const types = out.quotes.map((q: any) => q.type);
+        expect(types.filter((t: string) => t === "standard")).toHaveLength(5);
+        expect(types.filter((t: string) => t === "private")).toHaveLength(5);
+    });
+
+    it("preserves the order the API returned, so the best survive", () => {
+        const out = compactQuoteResult(result, 3) as any;
+        const standard = out.quotes.filter((q: any) => q.type === "standard");
+        expect(standard[0].amountOut).toBe(12.6);
+        expect(standard[0].amountOut).toBeGreaterThan(standard[2].amountOut);
+    });
+
+    it("reports what it dropped instead of truncating silently", () => {
+        const out = compactQuoteResult(result, 5) as any;
+        expect(out.total).toBe(145);
+        expect(out.returned).toBe(10);
+        expect(out.omitted).toBe(135);
+        expect(out.limitPerType).toBe(5);
+    });
+
+    it("strips logoUrl from each quote", () => {
+        const out = compactQuoteResult(result, 2) as any;
+        for (const q of out.quotes) expect(q.logoUrl).toBeUndefined();
+    });
+
+    it("keeps everything when the list is under the limit", () => {
+        const small = { total: 2, quotes: [quote("standard", 1), quote("dex", 2)] };
+        const out = compactQuoteResult(small, 5) as any;
+        expect(out.returned).toBe(2);
+        expect(out.omitted).toBe(0);
+    });
+
+    it("passes through a response with no quotes array", () => {
+        const weird = { error: "nope" };
+        expect(compactQuoteResult(weird, 5)).toBe(weird);
+    });
+
+    it("cuts a realistic payload by an order of magnitude", () => {
+        const before = JSON.stringify(result).length;
+        const after = JSON.stringify(compactQuoteResult(result, 5)).length;
+        expect(after).toBeLessThan(before / 10);
+    });
+});
+
+describe("compactOrder", () => {
+    const order = {
+        houdiniId: "4BigXnq4t6Y3i2mMKNWdxx",
+        depositAddress: "0xc5830704DeE31AC9856346AaCED1e93F13949632",
+        status: 0,
+        displayStatus: "WAITING_FOR_DEPOSIT",
+        inAmount: 0.5,
+        outAmount: 12.577,
+        isX402: true,
+        inToken: token,
+        outToken: token,
+    };
+
+    it("keeps the operational fields", () => {
+        const out = compactOrder(order) as any;
+        expect(out.houdiniId).toBe(order.houdiniId);
+        expect(out.depositAddress).toBe(order.depositAddress);
+        expect(out.displayStatus).toBe("WAITING_FOR_DEPOSIT");
+        expect(out.isX402).toBe(true);
+    });
+
+    it("compacts both embedded tokens", () => {
+        const out = compactOrder(order) as any;
+        expect(out.inToken.description).toBeUndefined();
+        expect(out.outToken.description).toBeUndefined();
+        expect(out.inToken.symbol).toBe("ETH");
+    });
+
+    it("does not mutate the input", () => {
+        compactOrder(order);
+        expect((order.inToken as any).description).toBeDefined();
+    });
+});
+
+describe("list helpers", () => {
+    it("compacts every token in a token result", () => {
+        const out = compactTokenResult({ total: 1, tokens: [token] }) as any;
+        expect(out.total).toBe(1);
+        expect(out.tokens[0].description).toBeUndefined();
+    });
+
+    it("compacts every order in an order list", () => {
+        const out = compactOrderList({
+            totalPages: 1,
+            orders: [{ houdiniId: "x", inToken: token }],
+        }) as any;
+        expect(out.orders[0].inToken.description).toBeUndefined();
+    });
+});
+
+describe("asToolResult", () => {
+    it("emits compact JSON, not pretty-printed", () => {
+        const text = asToolResult({ a: 1, b: 2 }).content[0].text;
+        expect(text).toBe('{"a":1,"b":2}');
+        expect(text).not.toContain("\n");
+    });
+});

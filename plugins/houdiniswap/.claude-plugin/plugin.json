@@ -2,7 +2,7 @@
   "name": "houdiniswap",
   "displayName": "HoudiniSwap Swap Agent",
   "description": "Discover, quote, and execute crypto swaps across 14 CEXes and 20+ DEXes via HoudiniSwap, with x402 pay-per-call (USDC on Base — no signup).",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "author": {
     "name": "HoudiniSwap",
     "url": "https://houdiniswap.com"
@@ -15,7 +15,7 @@
     "x402_private_key": {
       "type": "string",
       "title": "x402 wallet private key",
-      "description": "Optional. A 0x-prefixed 32-byte hex key holding USDC on Base, used to pay per API call. Leave empty to run read-only — token, chain and quote lookups still work.",
+      "description": "Required for any data. The API is pay-per-call: every request costs a fraction of a cent in USDC on Base, paid from this wallet. Paste the private key of a wallet funded with USDC on Base — MetaMask's exported key works with or without the 0x prefix. Without a key every request returns 402.",
       "sensitive": true
     }
   },

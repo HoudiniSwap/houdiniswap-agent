@@ -38,6 +38,26 @@ describe("getAuthConfig", () => {
         expect(getAuthConfig()).toEqual({ type: "x402", privateKey: VALID_KEY });
     });
 
+    it("accepts a bare 64-hex key and normalises it", () => {
+        // What MetaMask's "Show private key" gives you — no 0x prefix.
+        process.env.HOUDINI_X402_PRIVATE_KEY = "a".repeat(64);
+        expect(getAuthConfig()).toEqual({ type: "x402", privateKey: VALID_KEY });
+    });
+
+    it("accepts uppercase and mixed-case hex", () => {
+        process.env.HOUDINI_X402_PRIVATE_KEY = "AbCd".repeat(16);
+        expect(getAuthConfig()).toEqual({
+            type: "x402",
+            privateKey: `0x${"AbCd".repeat(16)}`,
+        });
+    });
+
+    it("does not warn when a bare key is accepted", () => {
+        process.env.HOUDINI_X402_PRIVATE_KEY = "a".repeat(64);
+        getAuthConfig();
+        expect(console.error).not.toHaveBeenCalled();
+    });
+
     it("ignores an unexpanded ${VAR} placeholder", () => {
         // What Claude Code passes when the plugin declares env passthrough and
         // the user never set the variable. Previously selected x402 mode and
@@ -54,8 +74,10 @@ describe("getAuthConfig", () => {
     it.each([
         ["too short", `0x${"a".repeat(63)}`],
         ["too long", `0x${"a".repeat(65)}`],
-        ["missing 0x prefix", "a".repeat(64)],
+        ["bare hex, too short", "a".repeat(63)],
+        ["bare hex, too long", "a".repeat(65)],
         ["non-hex characters", `0x${"z".repeat(64)}`],
+        ["0x prefix only", "0x"],
         ["empty string", ""],
         ["whitespace only", "   "],
     ])("ignores a malformed key (%s)", (_label, value) => {

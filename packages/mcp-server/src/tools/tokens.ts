@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { HoudiniClient, TokenResult } from "@houdiniswap/agent-shared";
 import { z } from "zod";
+import { asToolResult, compactTokenResult } from "../shape.js";
 
 export const registerTokenTools = (server: McpServer, client: HoudiniClient) => {
     server.tool(
@@ -16,15 +17,11 @@ export const registerTokenTools = (server: McpServer, client: HoudiniClient) => 
             mainnet: z.boolean().optional().describe("Only native/mainnet tokens"),
             page: z.number().int().min(1).default(1).optional().describe("Page number"),
             pageSize: z.number().int().min(1).max(100).default(20).optional().describe("Results per page"),
+            verbose: z.boolean().optional().describe("Return the full unfiltered API response"),
         },
-        async (params) => {
+        async ({ verbose, ...params }) => {
             const result = await client.get<TokenResult>("/tokens", params);
-            return {
-                content: [{
-                    type: "text",
-                    text: JSON.stringify(result, null, 2),
-                }],
-            };
+            return asToolResult(verbose ? result : compactTokenResult(result));
         },
     );
 };

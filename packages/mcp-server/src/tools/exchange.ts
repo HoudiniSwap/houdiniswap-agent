@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { HoudiniClient, Order } from "@houdiniswap/agent-shared";
 import { z } from "zod";
+import { asToolResult, compactOrder } from "../shape.js";
 
 export const registerExchangeTools = (server: McpServer, client: HoudiniClient) => {
     server.tool(
@@ -11,12 +12,11 @@ export const registerExchangeTools = (server: McpServer, client: HoudiniClient) 
             addressTo: z.string().describe("Destination wallet address for receiving funds"),
             addressFrom: z.string().optional().describe("Source wallet address (required for DEX swaps)"),
             destinationTag: z.string().optional().describe("Destination tag/memo (for XRP, XLM, etc.)"),
+            verbose: z.boolean().optional().describe("Return the full unfiltered API response"),
         },
-        async (params) => {
+        async ({ verbose, ...params }) => {
             const result = await client.post<Order>("/exchanges", params);
-            return {
-                content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-            };
+            return asToolResult(verbose ? result : compactOrder(result));
         },
     );
 };

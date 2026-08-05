@@ -59,7 +59,9 @@ claude mcp add houdiniswap --env HOUDINI_X402_PRIVATE_KEY=0x... -- npx -y @houdi
 /plugin marketplace add HoudiniSwap/houdiniswap-agent
 /plugin install houdiniswap@houdiniswap
 ```
-Installs the HoudiniSwap swap-agent skill **and** wires up the MCP server. Claude Code prompts for your x402 wallet key at enable time and stores it in the OS keychain. Skip it to run read-only — token, chain and quote lookups still work.
+Installs the HoudiniSwap swap-agent skill **and** wires up the MCP server. Claude Code prompts for your x402 wallet key at enable time and stores it in the OS keychain.
+
+A funded wallet is **required** — the API is pay-per-call and only `GET /status` is free, so without a key every tool returns 402. Fund a wallet with a couple of dollars of USDC on Base and you're set; no gas needed, payments are gasless EIP-3009 authorizations settled by the facilitator.
 
 ### With API Key (for partners)
 
