@@ -1,7 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { HoudiniClient } from "@houdiniswap/agent-shared";
 import { z } from "zod";
+import { asToolResult } from "../shape.js";
 
+// No field stripping here: these responses are unsigned transaction data, and a
+// dropped field is a transaction the user cannot sign. Only the indentation goes.
 export const registerDexTools = (server: McpServer, client: HoudiniClient) => {
     server.tool(
         "dexApprove",
@@ -12,9 +15,7 @@ export const registerDexTools = (server: McpServer, client: HoudiniClient) => {
         },
         async (params) => {
             const result = await client.post("/dex/approve", params);
-            return {
-                content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-            };
+            return asToolResult(result);
         },
     );
 
@@ -27,9 +28,7 @@ export const registerDexTools = (server: McpServer, client: HoudiniClient) => {
         },
         async (params) => {
             const result = await client.post("/dex/allowance", params);
-            return {
-                content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-            };
+            return asToolResult(result);
         },
     );
 
@@ -42,9 +41,7 @@ export const registerDexTools = (server: McpServer, client: HoudiniClient) => {
         },
         async (params) => {
             const result = await client.post("/dex/confirmTx", params);
-            return {
-                content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-            };
+            return asToolResult(result);
         },
     );
 
@@ -57,9 +54,7 @@ export const registerDexTools = (server: McpServer, client: HoudiniClient) => {
         },
         async (params) => {
             const result = await client.post("/dex/chainSignatures", params);
-            return {
-                content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-            };
+            return asToolResult(result);
         },
     );
 };
