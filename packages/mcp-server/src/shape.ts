@@ -74,19 +74,24 @@ export const compactChainResult = (result: unknown): unknown => {
     return { ...source, chains: (source.chains as unknown[]).map(compactChain) };
 };
 
-const PROVIDER_KEYS = ["name", "shortName", "type", "enabled"] as const;
+const PROVIDER_KEYS = ["name", "shortName", "enabled", "isDex", "deprecated"] as const;
 
-/** Drops `logoUrl`; `shortName` is what the `swaps` quote filter takes. */
+const compactProvider = (provider: unknown): unknown =>
+    provider && typeof provider === "object" ? pick(provider as Json, PROVIDER_KEYS) : provider;
+
+/**
+ * Drops `id`, `txUrl`, `logoUrl` and the markup/slippage capability flags;
+ * `shortName` is what the `swaps` quote filter takes.
+ *
+ * `GET /swaps` answers with a bare array, not `{ swaps: [...] }`. Both are
+ * handled — an object-only guard here silently returned the payload unshaped.
+ */
 export const compactProviderResult = (result: unknown): unknown => {
+    if (Array.isArray(result)) return result.map(compactProvider);
     if (!result || typeof result !== "object") return result;
     const source = result as Json;
     if (!Array.isArray(source.swaps)) return result;
-    return {
-        ...source,
-        swaps: (source.swaps as unknown[]).map((provider) =>
-            provider && typeof provider === "object" ? pick(provider as Json, PROVIDER_KEYS) : provider,
-        ),
-    };
+    return { ...source, swaps: (source.swaps as unknown[]).map(compactProvider) };
 };
 
 const QUOTE_KEYS = [

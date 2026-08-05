@@ -62,12 +62,20 @@ export interface Chain {
     hasDex?: boolean;
 }
 
+/** Shape of a row from `GET /swaps`, which returns a bare array. */
 export interface SwapProvider {
+    id: string;
     name: string;
+    /** What the `swaps` quote filter takes, e.g. "cn", "el", "nx". */
     shortName: string;
-    logoUrl?: string;
-    type: string;
     enabled: boolean;
+    isDex: boolean;
+    deprecated?: boolean;
+    txUrl?: string;
+    logoUrl?: string;
+    markupSupported?: boolean;
+    slippageSupported?: boolean;
+    autoSlippageSupported?: boolean;
 }
 
 export interface QuoteResult {

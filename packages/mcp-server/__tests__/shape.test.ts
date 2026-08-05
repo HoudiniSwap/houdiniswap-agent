@@ -155,29 +155,66 @@ describe("compactChainResult", () => {
 });
 
 describe("compactProviderResult", () => {
-    const providers = {
-        swaps: [
-            { name: "Nexchange", shortName: "nx", type: "cex", enabled: true, logoUrl: "https://…/nexchange.png" },
-            { name: "Uniswap", shortName: "uni", type: "dex", enabled: false, logoUrl: "https://…/uniswap.png" },
-        ],
-    };
+    // GET /swaps answers with a BARE ARRAY. An earlier version of this helper
+    // only unwrapped `{ swaps: [...] }`, so it fell straight through and shipped
+    // every logoUrl unshaped — caught by driving the real API, not a fixture.
+    const providers = [
+        {
+            id: "6421c1bb38a32da00696b9bc",
+            name: "ChangeNow",
+            shortName: "cn",
+            txUrl: "https://changenow.io/exchange/txs/",
+            enabled: true,
+            isDex: false,
+            deprecated: false,
+            markupSupported: false,
+            slippageSupported: false,
+            logoUrl: "https://api.houdiniswap.com/assets/logos/changenow.png",
+            autoSlippageSupported: false,
+        },
+        {
+            id: "6421c1bb38a32da00696b9bd",
+            name: "Uniswap",
+            shortName: "uni",
+            enabled: false,
+            isDex: true,
+            deprecated: true,
+            logoUrl: "https://api.houdiniswap.com/assets/logos/uniswap.png",
+        },
+    ];
 
-    it("keeps shortName, which is what the quote filter takes", () => {
-        const out = compactProviderResult(providers) as any;
-        expect(out.swaps.map((s: any) => s.shortName)).toEqual(["nx", "uni"]);
+    it("shapes a bare array, the shape the API actually returns", () => {
+        const out = compactProviderResult(providers) as any[];
+        expect(Array.isArray(out)).toBe(true);
+        expect(out.map((s) => s.shortName)).toEqual(["cn", "uni"]);
     });
 
-    it("keeps enabled: false rather than dropping the falsy value", () => {
-        const out = compactProviderResult(providers) as any;
-        expect(out.swaps[1].enabled).toBe(false);
+    it("keeps false-valued flags rather than dropping them as falsy", () => {
+        const out = compactProviderResult(providers) as any[];
+        expect(out[0].enabled).toBe(true);
+        expect(out[0].isDex).toBe(false);
+        expect(out[1].enabled).toBe(false);
+        expect(out[1].deprecated).toBe(true);
     });
 
-    it("drops logoUrl", () => {
-        const out = compactProviderResult(providers) as any;
-        for (const s of out.swaps) expect(s.logoUrl).toBeUndefined();
+    it("drops logoUrl, txUrl, id and the capability flags", () => {
+        const out = compactProviderResult(providers) as any[];
+        for (const s of out) {
+            expect(s.logoUrl).toBeUndefined();
+            expect(s.txUrl).toBeUndefined();
+            expect(s.id).toBeUndefined();
+            expect(s.markupSupported).toBeUndefined();
+            expect(s.autoSlippageSupported).toBeUndefined();
+        }
     });
 
-    it("passes through a response with no swaps array", () => {
+    it("also handles a { swaps: [...] } wrapper, should the API ever add one", () => {
+        const out = compactProviderResult({ swaps: providers, total: 2 }) as any;
+        expect(out.total).toBe(2);
+        expect(out.swaps[0].logoUrl).toBeUndefined();
+    });
+
+    it("passes through a response that is neither", () => {
         const weird = { error: "nope" };
         expect(compactProviderResult(weird)).toBe(weird);
     });

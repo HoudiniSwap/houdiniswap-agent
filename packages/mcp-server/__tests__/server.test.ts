@@ -212,48 +212,77 @@ describe("MCP Server", () => {
         });
     });
 
+    // These assert the request BODY, not just the path. The previous versions
+    // checked only that a POST reached the right URL, so they stayed green while
+    // every DEX tool sent `address` to an API that requires `addressFrom` and
+    // rejects unknown properties — a guaranteed 422 on every call.
     describe("DEX tools", () => {
-        it("dexApprove calls POST /dex/approve", async () => {
+        const ADDRESS = "0xb7dE6b6eEBF7401aFea5a49D6405C9048fEf2d40";
+
+        it("dexApprove posts quoteId + addressFrom, the names the API requires", async () => {
             mockClient.mockPost("/dex/approve", { txData: "0x..." });
             await mcpClient.callTool({
                 name: "dexApprove",
-                arguments: { quoteId: "q1", address: "0xabc" },
+                arguments: { quoteId: "q1", addressFrom: ADDRESS },
             });
             const call = mockClient.calls.find((c) => c.path === "/dex/approve");
             expect(call?.method).toBe("POST");
+            expect(call?.data).toEqual({ quoteId: "q1", addressFrom: ADDRESS });
+            expect(call?.data).not.toHaveProperty("address");
         });
 
-        it("dexCheckAllowance calls POST /dex/allowance", async () => {
+        it("dexApprove passes usePermit through when given", async () => {
+            mockClient.mockPost("/dex/approve", { txData: "0x..." });
+            await mcpClient.callTool({
+                name: "dexApprove",
+                arguments: { quoteId: "q1", addressFrom: ADDRESS, usePermit: false },
+            });
+            const call = mockClient.calls.find((c) => c.path === "/dex/approve");
+            expect(call?.data).toMatchObject({ usePermit: false });
+        });
+
+        it("dexCheckAllowance posts quoteId + addressFrom", async () => {
             mockClient.mockPost("/dex/allowance", { sufficient: true });
             await mcpClient.callTool({
                 name: "dexCheckAllowance",
-                arguments: { quoteId: "q1", address: "0xabc" },
+                arguments: { quoteId: "q1", addressFrom: ADDRESS },
             });
-            expect(mockClient.calls).toContainEqual(
-                expect.objectContaining({ method: "POST", path: "/dex/allowance" }),
-            );
+            const call = mockClient.calls.find((c) => c.path === "/dex/allowance");
+            expect(call?.data).toEqual({ quoteId: "q1", addressFrom: ADDRESS });
+            expect(call?.data).not.toHaveProperty("address");
         });
 
-        it("dexConfirmTx calls POST /dex/confirmTx", async () => {
+        it("dexConfirmTx posts the order id, not a quoteId", async () => {
             mockClient.mockPost("/dex/confirmTx", { confirmed: true });
             await mcpClient.callTool({
                 name: "dexConfirmTx",
-                arguments: { quoteId: "q1", txHash: "0xdeadbeef" },
+                arguments: { id: "daNKAz3UCsHnUcn7KLjkH6", txHash: "0xdeadbeef" },
             });
-            expect(mockClient.calls).toContainEqual(
-                expect.objectContaining({ method: "POST", path: "/dex/confirmTx" }),
-            );
+            const call = mockClient.calls.find((c) => c.path === "/dex/confirmTx");
+            expect(call?.data).toEqual({ id: "daNKAz3UCsHnUcn7KLjkH6", txHash: "0xdeadbeef" });
+            expect(call?.data).not.toHaveProperty("quoteId");
         });
 
-        it("dexChainSignatures calls POST /dex/chainSignatures", async () => {
+        it("dexChainSignatures posts the full signature-chain body", async () => {
             mockClient.mockPost("/dex/chainSignatures", { isComplete: false, data: {} });
             await mcpClient.callTool({
                 name: "dexChainSignatures",
-                arguments: { quoteId: "q1" },
+                arguments: {
+                    quoteId: "q1",
+                    addressFrom: ADDRESS,
+                    previousSignature: { signature: "0xsig", key: "permit" },
+                    signatureKey: "permit",
+                    signatureStep: 1,
+                },
             });
-            expect(mockClient.calls).toContainEqual(
-                expect.objectContaining({ method: "POST", path: "/dex/chainSignatures" }),
-            );
+            const call = mockClient.calls.find((c) => c.path === "/dex/chainSignatures");
+            expect(call?.data).toEqual({
+                quoteId: "q1",
+                addressFrom: ADDRESS,
+                previousSignature: { signature: "0xsig", key: "permit" },
+                signatureKey: "permit",
+                signatureStep: 1,
+            });
         });
     });
 

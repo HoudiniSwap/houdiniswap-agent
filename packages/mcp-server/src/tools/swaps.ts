@@ -11,7 +11,7 @@ export const registerSwapProviderTools = (server: McpServer, client: HoudiniClie
             verbose: z.boolean().optional().describe("Return the full unfiltered API response"),
         },
         async ({ verbose }) => {
-            const result = await client.get<{ swaps: SwapProvider[] }>("/swaps");
+            const result = await client.get<SwapProvider[]>("/swaps");
             return asToolResult(verbose ? result : compactProviderResult(result));
         },
     );

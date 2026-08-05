@@ -72,3 +72,7 @@ claude mcp add houdiniswap --env HOUDINI_X402_PRIVATE_KEY=0x... -- npx -y @houdi
   tool-result limit outright and returned nothing usable). Pass `verbose: true` to any tool for the
   raw API response. The DEX tools are the exception: their payloads are unsigned transaction data,
   so nothing is stripped there — only the indentation.
+- DEX tool parameter names mirror the API request bodies exactly (`addressFrom`, and `id` for
+  `dexConfirmTx`). They previously used `address`/`quoteId`; since the API rejects unknown
+  properties, every DEX call returned 422. The unit tests now assert the request body, not just
+  the path — checking only the path is what let the mismatch stay green.
