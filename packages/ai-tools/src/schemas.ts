@@ -17,6 +17,8 @@ export const chainsSchema = z.object({
     hasDex: z.boolean().optional().describe("Only chains with DEX support"),
     kind: z.string().optional().describe("Chain kind filter"),
     name: z.string().optional().describe("Search by chain name"),
+    chainId: z.number().int().optional().describe("Filter by EVM chain ID (e.g. 8453 for Base)"),
+    memoNeeded: z.boolean().optional().describe("Only chains that require a memo/destination tag"),
     page: z.number().int().min(1).default(1).optional(),
     pageSize: z.number().int().min(1).max(100).default(100).optional(),
 });
