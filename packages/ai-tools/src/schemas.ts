@@ -58,24 +58,38 @@ export const minMaxSchema = z.object({
     tokenIdTo: z.string().describe("Destination token ID (from getTokens)"),
 });
 
+// These mirror the API request bodies exactly. They previously used `address`
+// and `quoteId` where the API expects `addressFrom` and `id`; since the API
+// rejects unknown properties, every DEX call returned 422.
 export const dexApproveSchema = z.object({
     quoteId: z.string().describe("Quote ID from getQuote (DEX quote)"),
-    address: z.string().describe("Wallet address that will approve the token"),
+    addressFrom: z.string().describe("Address the amount will be deducted from (EVM 0x… or Tron T…)"),
+    usePermit: z.boolean().optional().describe("Use permit instead of approve; defaults to true where supported"),
 });
 
 export const dexAllowanceSchema = z.object({
     quoteId: z.string().describe("Quote ID from getQuote (DEX quote)"),
-    address: z.string().describe("Wallet address to check allowance for"),
+    addressFrom: z.string().describe("Address the amount will be deducted from (EVM 0x… or Tron T…)"),
+    usePermit: z.boolean().optional().describe("Use permit instead of approve; defaults to true where supported"),
 });
 
 export const dexConfirmTxSchema = z.object({
-    quoteId: z.string().describe("Quote ID from getQuote"),
-    txHash: z.string().describe("On-chain transaction hash"),
+    id: z.string().min(3).describe("The Houdini order ID (houdiniId from createExchange) — not the quote ID"),
+    txHash: z.string().optional().describe("Transaction hash. Required for on-chain orders, optional for off-chain."),
 });
 
 export const dexChainSignaturesSchema = z.object({
     quoteId: z.string().describe("Quote ID from getQuote"),
-    previousSignature: z.string().optional().describe("Previous signature from last call"),
+    addressFrom: z.string().describe("EVM address the amount will be deducted from"),
+    previousSignature: z
+        .object({
+            signature: z.string(),
+            key: z.string(),
+            swapRequiredMetadata: z.record(z.unknown()).optional(),
+        })
+        .describe("The signature object produced by the wallet in the previous step"),
+    signatureKey: z.string().describe("Signature key returned by the previous approve or chainSignatures call"),
+    signatureStep: z.number().int().min(0).describe("Step number in the signature chain sequence"),
 });
 
 export const swapSchema = z.object({

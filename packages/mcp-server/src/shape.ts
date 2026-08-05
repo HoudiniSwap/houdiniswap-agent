@@ -44,6 +44,56 @@ export const compactToken = (token: unknown): unknown => {
     return out;
 };
 
+const CHAIN_KEYS = [
+    "id",
+    "name",
+    "shortName",
+    "kind",
+    "chainId",
+    "memoNeeded",
+    "hasCex",
+    "hasDex",
+] as const;
+
+/**
+ * Drops `icon`, the two address-validation regexes, `priority`, and the
+ * explorer/address URL templates. The URL templates alone are ~5.8 KB across a
+ * 100-chain page, and an agent needs them for at most one chain — narrow with
+ * `getChains({ name })` or pass `verbose: true` to get them back.
+ */
+export const compactChain = (chain: unknown): unknown => {
+    if (!chain || typeof chain !== "object") return chain;
+    return pick(chain as Json, CHAIN_KEYS);
+};
+
+/** Preserves `total`/`totalPages` so a truncated page stays visible. */
+export const compactChainResult = (result: unknown): unknown => {
+    if (!result || typeof result !== "object") return result;
+    const source = result as Json;
+    if (!Array.isArray(source.chains)) return result;
+    return { ...source, chains: (source.chains as unknown[]).map(compactChain) };
+};
+
+const PROVIDER_KEYS = ["name", "shortName", "enabled", "isDex", "deprecated"] as const;
+
+const compactProvider = (provider: unknown): unknown =>
+    provider && typeof provider === "object" ? pick(provider as Json, PROVIDER_KEYS) : provider;
+
+/**
+ * Drops `id`, `txUrl`, `logoUrl` and the markup/slippage capability flags;
+ * `shortName` is what the `swaps` quote filter takes.
+ *
+ * `GET /swaps` answers with a bare array, not `{ swaps: [...] }`. Both are
+ * handled — an object-only guard here silently returned the payload unshaped.
+ */
+export const compactProviderResult = (result: unknown): unknown => {
+    if (Array.isArray(result)) return result.map(compactProvider);
+    if (!result || typeof result !== "object") return result;
+    const source = result as Json;
+    if (!Array.isArray(source.swaps)) return result;
+    return { ...source, swaps: (source.swaps as unknown[]).map(compactProvider) };
+};
+
 const QUOTE_KEYS = [
     "quoteId",
     "swap",

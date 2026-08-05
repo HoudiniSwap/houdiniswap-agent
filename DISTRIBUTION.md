@@ -66,5 +66,13 @@ claude mcp add houdiniswap --env HOUDINI_X402_PRIVATE_KEY=0x... -- npx -y @houdi
   cleanly, not that lookups work. A malformed or unsubstituted key is ignored with a warning on stderr
   rather than crashing the server (see `packages/mcp-server/src/auth.ts`).
 - Tool responses are shaped for agents, not browsers (`packages/mcp-server/src/shape.ts`): token
-  descriptions and icons are stripped, and `getQuote` keeps the best 5 per type while reporting how
-  many it omitted. Pass `verbose: true` to any tool for the raw API response.
+  descriptions and icons are stripped, `getQuote` keeps the best 5 per type while reporting how
+  many it omitted, and `getChains` drops icons, explorer URL templates and address-validation
+  regexes (a 100-chain page went from 49.8 KB to 10.8 KB — the unshaped version overran the MCP
+  tool-result limit outright and returned nothing usable). Pass `verbose: true` to any tool for the
+  raw API response. The DEX tools are the exception: their payloads are unsigned transaction data,
+  so nothing is stripped there — only the indentation.
+- DEX tool parameter names mirror the API request bodies exactly (`addressFrom`, and `id` for
+  `dexConfirmTx`). They previously used `address`/`quoteId`; since the API rejects unknown
+  properties, every DEX call returned 422. The unit tests now assert the request body, not just
+  the path — checking only the path is what let the mismatch stay green.

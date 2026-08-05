@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { HoudiniClient, MinMaxResult } from "@houdiniswap/agent-shared";
 import { z } from "zod";
+import { asToolResult } from "../shape.js";
 
 export const registerMinMaxTools = (server: McpServer, client: HoudiniClient) => {
     server.tool(
@@ -12,9 +13,7 @@ export const registerMinMaxTools = (server: McpServer, client: HoudiniClient) =>
         },
         async (params) => {
             const result = await client.get<MinMaxResult>("/minMax", params);
-            return {
-                content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-            };
+            return asToolResult(result);
         },
     );
 };

@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { HoudiniClient, TokenResult, Token, QuoteResult, Order, MinMaxResult } from "@houdiniswap/agent-shared";
 import { z } from "zod";
+import { asToolResult } from "../shape.js";
 
 const pickToken = (tokens: Token[]): Token | undefined =>
     tokens.find(t => t.mainnet) ?? tokens[0];
@@ -95,22 +96,17 @@ export const registerSwapFlowTool = (server: McpServer, client: HoudiniClient) =
                     };
                 }
 
-                return {
-                    content: [{
-                        type: "text",
-                        text: JSON.stringify({
-                            success: true,
-                            order: {
-                                houdiniId: order.houdiniId,
-                                status: order.status,
-                                depositAddress,
-                                estimatedOutput: bestQuote.amountOut,
-                                provider: bestQuote.swapName,
-                            },
-                            instructions: `Send ${amount} ${fromSymbol} to ${depositAddress} to complete the swap.`,
-                        }, null, 2),
-                    }],
-                };
+                return asToolResult({
+                    success: true,
+                    order: {
+                        houdiniId: order.houdiniId,
+                        status: order.status,
+                        depositAddress,
+                        estimatedOutput: bestQuote.amountOut,
+                        provider: bestQuote.swapName,
+                    },
+                    instructions: `Send ${amount} ${fromSymbol} to ${depositAddress} to complete the swap.`,
+                });
             } catch (err) {
                 const message = err instanceof Error ? err.message : "Unknown error";
                 return {

@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
     compactToken,
+    compactChain,
+    compactChainResult,
+    compactProviderResult,
     compactQuoteResult,
     compactOrder,
     compactTokenResult,
@@ -76,6 +79,144 @@ describe("compactToken", () => {
     it("passes through non-objects untouched", () => {
         expect(compactToken(null)).toBeNull();
         expect(compactToken("nope")).toBe("nope");
+    });
+});
+
+// Field-for-field copy of a row from a live GET /chains page.
+const chain = {
+    id: "68df742d6436a987148301e4",
+    name: "Bittensor evm",
+    shortName: "TAO",
+    memoNeeded: false,
+    explorerUrl: "https://evm.taostats.io/tx/{txHash}",
+    addressUrl: "https://evm.taostats.io/address/{address}",
+    icon: "https://api.houdiniswap.com/assets/chains/TAO-qj6qf1.png",
+    kind: "evm",
+    addressValidation: "^(0x)[0-9A-Fa-f]{40}$",
+    tokenAddressValidation: "^(0x)[0-9A-Fa-f]{40}$",
+    chainId: 964,
+    priority: 12,
+};
+
+describe("compactChain", () => {
+    it("keeps what an agent needs to pick a chain", () => {
+        const out = compactChain(chain) as Record<string, unknown>;
+        expect(out.id).toBe(chain.id);
+        expect(out.name).toBe("Bittensor evm");
+        expect(out.shortName).toBe("TAO");
+        expect(out.kind).toBe("evm");
+        expect(out.chainId).toBe(964);
+        expect(out.memoNeeded).toBe(false);
+    });
+
+    it("drops icons, URL templates and validation regexes", () => {
+        const out = compactChain(chain) as Record<string, unknown>;
+        expect(out.icon).toBeUndefined();
+        expect(out.explorerUrl).toBeUndefined();
+        expect(out.addressUrl).toBeUndefined();
+        expect(out.addressValidation).toBeUndefined();
+        expect(out.tokenAddressValidation).toBeUndefined();
+        expect(out.priority).toBeUndefined();
+    });
+
+    it("passes through non-objects untouched", () => {
+        expect(compactChain(null)).toBeNull();
+        expect(compactChain(7)).toBe(7);
+    });
+});
+
+describe("compactChainResult", () => {
+    // The unshaped 100-chain page was 50,946 characters, which overran the MCP
+    // tool-result limit outright — getChains returned nothing usable.
+    const page = { chains: Array.from({ length: 100 }, () => chain), totalPages: 2, total: 130 };
+
+    it("keeps pagination visible so a truncated page is obvious", () => {
+        const out = compactChainResult(page) as any;
+        expect(out.total).toBe(130);
+        expect(out.totalPages).toBe(2);
+        expect(out.chains).toHaveLength(100);
+    });
+
+    it("compacts every chain in the page", () => {
+        const out = compactChainResult(page) as any;
+        for (const c of out.chains) expect(c.icon).toBeUndefined();
+    });
+
+    it("brings a full page back under the tool-result limit", () => {
+        const before = JSON.stringify(page).length;
+        const after = JSON.stringify(compactChainResult(page)).length;
+        expect(after).toBeLessThan(before / 2);
+    });
+
+    it("passes through a response with no chains array", () => {
+        const weird = { error: "nope" };
+        expect(compactChainResult(weird)).toBe(weird);
+    });
+});
+
+describe("compactProviderResult", () => {
+    // GET /swaps answers with a BARE ARRAY. An earlier version of this helper
+    // only unwrapped `{ swaps: [...] }`, so it fell straight through and shipped
+    // every logoUrl unshaped — caught by driving the real API, not a fixture.
+    const providers = [
+        {
+            id: "6421c1bb38a32da00696b9bc",
+            name: "ChangeNow",
+            shortName: "cn",
+            txUrl: "https://changenow.io/exchange/txs/",
+            enabled: true,
+            isDex: false,
+            deprecated: false,
+            markupSupported: false,
+            slippageSupported: false,
+            logoUrl: "https://api.houdiniswap.com/assets/logos/changenow.png",
+            autoSlippageSupported: false,
+        },
+        {
+            id: "6421c1bb38a32da00696b9bd",
+            name: "Uniswap",
+            shortName: "uni",
+            enabled: false,
+            isDex: true,
+            deprecated: true,
+            logoUrl: "https://api.houdiniswap.com/assets/logos/uniswap.png",
+        },
+    ];
+
+    it("shapes a bare array, the shape the API actually returns", () => {
+        const out = compactProviderResult(providers) as any[];
+        expect(Array.isArray(out)).toBe(true);
+        expect(out.map((s) => s.shortName)).toEqual(["cn", "uni"]);
+    });
+
+    it("keeps false-valued flags rather than dropping them as falsy", () => {
+        const out = compactProviderResult(providers) as any[];
+        expect(out[0].enabled).toBe(true);
+        expect(out[0].isDex).toBe(false);
+        expect(out[1].enabled).toBe(false);
+        expect(out[1].deprecated).toBe(true);
+    });
+
+    it("drops logoUrl, txUrl, id and the capability flags", () => {
+        const out = compactProviderResult(providers) as any[];
+        for (const s of out) {
+            expect(s.logoUrl).toBeUndefined();
+            expect(s.txUrl).toBeUndefined();
+            expect(s.id).toBeUndefined();
+            expect(s.markupSupported).toBeUndefined();
+            expect(s.autoSlippageSupported).toBeUndefined();
+        }
+    });
+
+    it("also handles a { swaps: [...] } wrapper, should the API ever add one", () => {
+        const out = compactProviderResult({ swaps: providers, total: 2 }) as any;
+        expect(out.total).toBe(2);
+        expect(out.swaps[0].logoUrl).toBeUndefined();
+    });
+
+    it("passes through a response that is neither", () => {
+        const weird = { error: "nope" };
+        expect(compactProviderResult(weird)).toBe(weird);
     });
 });
 
