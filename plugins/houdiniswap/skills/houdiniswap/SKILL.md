@@ -103,6 +103,12 @@ Use the `swaps` parameter to include only specific providers:
 ```
 getQuote({ from, to, amount, swaps: ["cn", "el", "se"] })
 ```
+> ⚠️ **Before calling `createExchange`, check that the chosen quote's `swap` field matches what the
+> user asked for.** Ordering from the wrong provider cannot be undone. This is not hypothetical: a
+> `swaps: ["su"]` request once came back led by PancakeSwap because an older server build dropped
+> the parameter before it reached the API. `getQuote` now re-checks the filter itself and sets
+> `swapsFilteredClientSide: true` if it had to intervene — but confirm the provider anyway.
+
 **Call `getSwapProviders` to get the shortNames — do not work from a memorised list.** Providers
 are added and removed regularly, and a hardcoded list goes stale silently: passing a shortName that
 no longer exists filters away every quote and looks like "no routes available".

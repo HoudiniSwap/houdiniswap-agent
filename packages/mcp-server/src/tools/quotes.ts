@@ -30,7 +30,7 @@ export const registerQuoteTools = (server: McpServer, client: HoudiniClient) => 
         async ({ limitPerType, verbose, ...params }) => {
             const result = await client.get<QuoteResult>("/quotes", params);
             if (verbose) return asToolResult(result);
-            return asToolResult(compactQuoteResult(result, limitPerType ?? 5));
+            return asToolResult(compactQuoteResult(result, limitPerType ?? 5, params.swaps));
         },
     );
 };
