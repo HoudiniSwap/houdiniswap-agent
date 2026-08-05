@@ -29,7 +29,11 @@ const main = async () => {
         await server.connect(httpTransport);
 
         app.all("/mcp", async (req, res) => {
-            await httpTransport.handleRequest(req, res);
+            // `req.body` must be passed through: express.json() above has already
+            // consumed the request stream, so without it the transport re-reads a
+            // drained stream and answers every request with "Parse error: Invalid
+            // JSON" — which is what it did.
+            await httpTransport.handleRequest(req, res, req.body);
         });
 
         app.listen(port, () => {

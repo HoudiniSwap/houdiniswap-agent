@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { HoudiniClient } from "@houdiniswap/agent-shared";
 import { registerTokenTools } from "./tools/tokens.js";
@@ -11,10 +12,14 @@ import { registerDexTools } from "./tools/dex.js";
 import { registerSwapFlowTool } from "./tools/swap-flow.js";
 import { registerResources } from "./resources/openapi.js";
 
+// Read from package.json rather than hardcoding: this is the version MCP clients
+// display, and it had been stuck at 0.1.0 across every release since.
+const { version } = createRequire(import.meta.url)("../package.json") as { version: string };
+
 export const createMcpServer = (client: HoudiniClient): McpServer => {
     const server = new McpServer({
         name: "houdiniswap",
-        version: "0.1.0",
+        version,
     });
 
     // Register all tools
