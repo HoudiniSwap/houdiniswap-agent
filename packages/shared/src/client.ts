@@ -1,3 +1,4 @@
+import { USDC_BASE } from "./constants.js";
 import type { HoudiniConfig, HoudiniAuth, ApiError } from "./types.js";
 import { createX402Fetch } from "./x402.js";
 
@@ -83,8 +84,6 @@ export class HoudiniClient {
         return this.baseUrl;
     }
 }
-
-const USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 
 /**
  * The x402 middleware answers with an empty body, so the generic path would
