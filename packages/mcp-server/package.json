@@ -1,6 +1,6 @@
 {
   "name": "@houdiniswap/mcp-server",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "HoudiniSwap MCP server — connect AI agents to 14 CEXes and 20+ DEXes via Model Context Protocol",
   "type": "module",
   "license": "MIT",

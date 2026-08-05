@@ -9,6 +9,10 @@ class MockHoudiniClient {
     calls: Array<{ method: string; path: string; data?: unknown }> = [];
     private responses = new Map<string, unknown>();
 
+    reset() {
+        this.responses.clear();
+    }
+
     mockGet(pathPrefix: string, data: unknown) {
         this.responses.set(`GET:${pathPrefix}`, data);
     }
@@ -83,6 +87,10 @@ afterAll(async () => {
 
 beforeEach(() => {
     mockClient.calls = [];
+    // Responses are matched by path prefix, so a mock left over from an earlier
+    // test can shadow a later one: a `/orders` mock swallows `/orders/H1`.
+    // Clearing here keeps tests independent of declaration order.
+    mockClient.reset();
 });
 
 describe("MCP Server", () => {
@@ -166,6 +174,25 @@ describe("MCP Server", () => {
             });
         });
 
+        it("forwards the advanced quote options the API accepts", async () => {
+            mockClient.mockGet("/quotes", { quotes: [] });
+            await mcpClient.callTool({
+                name: "getQuote",
+                arguments: {
+                    from: "a", to: "b", amount: 1,
+                    amountType: "receive", fixed: true, useXmr: true,
+                    rotateFallback: true, refundAddress: "0xrefund",
+                    inLegIncludedSwaps: ["cn"], outLegExcludedSwaps: ["se"],
+                },
+            });
+            const call = mockClient.calls.find((c) => c.path === "/quotes");
+            expect(call?.data).toMatchObject({
+                amountType: "receive", fixed: true, useXmr: true,
+                rotateFallback: true, refundAddress: "0xrefund",
+                inLegIncludedSwaps: ["cn"], outLegExcludedSwaps: ["se"],
+            });
+        });
+
         it("does not leak the client-side limitPerType to the API", async () => {
             mockClient.mockGet("/quotes", { quotes: [] });
             await mcpClient.callTool({
@@ -178,7 +205,59 @@ describe("MCP Server", () => {
         });
     });
 
+    // A request for January 2020 used to return today's orders: the tool sent
+    // `dateFrom`/`dateTo`, the API takes `from`/`to`, and unknown query params
+    // are ignored rather than rejected.
+    describe("getOrders filters", () => {
+        it("sends the date range as from/to, the names the API accepts", async () => {
+            mockClient.mockGet("/orders", { orders: [], total: 0 });
+            await mcpClient.callTool({
+                name: "getOrders",
+                arguments: { from: "2020-01-01T00:00:00.000Z", to: "2020-01-02T00:00:00.000Z" },
+            });
+            const call = mockClient.calls.find((c) => c.path === "/orders");
+            expect(call?.data).toMatchObject({
+                from: "2020-01-01T00:00:00.000Z",
+                to: "2020-01-02T00:00:00.000Z",
+            });
+            expect(call?.data).not.toHaveProperty("dateFrom");
+            expect(call?.data).not.toHaveProperty("dateTo");
+        });
+
+        it("forwards the remaining filters", async () => {
+            mockClient.mockGet("/orders", { orders: [] });
+            await mcpClient.callTool({
+                name: "getOrders",
+                arguments: {
+                    anonymous: true, inTokenId: "t1", outTokenId: "t2",
+                    sortBy: "amount", sortOrder: "asc",
+                },
+            });
+            const call = mockClient.calls.find((c) => c.path === "/orders");
+            expect(call?.data).toMatchObject({
+                anonymous: true, inTokenId: "t1", outTokenId: "t2",
+                sortBy: "amount", sortOrder: "asc",
+            });
+        });
+    });
+
     describe("createExchange", () => {
+        it("forwards permit signatures and refund fields", async () => {
+            mockClient.mockPost("/exchanges", { houdiniId: "H1" });
+            const signatures = [{ signature: "0xsig", key: "permit" }];
+            await mcpClient.callTool({
+                name: "createExchange",
+                arguments: {
+                    quoteId: "q1", addressTo: "0xabc", addressFrom: "0xdef",
+                    signatures, refundAddress: "0xrefund", refundExtraId: "memo1",
+                },
+            });
+            const call = mockClient.calls.find((c) => c.path === "/exchanges");
+            expect(call?.data).toMatchObject({
+                signatures, refundAddress: "0xrefund", refundExtraId: "memo1",
+            });
+        });
+
         it("calls POST /exchanges with body", async () => {
             mockClient.mockPost("/exchanges", {
                 houdiniId: "HOUDINI123",
