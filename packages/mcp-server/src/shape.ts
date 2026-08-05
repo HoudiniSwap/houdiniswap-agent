@@ -28,6 +28,10 @@ const TOKEN_KEYS = [
     "address",
     "decimals",
     "mainnet",
+    // Safety-critical: the skill requires the agent to warn before swapping an
+    // unverified token, which it cannot do if this is stripped. Absent on
+    // verified tokens, so it costs nothing on the common path.
+    "unverified",
     "hasCex",
     "hasDex",
     "hasSelfPrivate",

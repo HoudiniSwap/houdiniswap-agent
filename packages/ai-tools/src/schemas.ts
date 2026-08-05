@@ -29,8 +29,12 @@ export const quoteSchema = z.object({
     slippage: z.number().min(0).max(50).optional().describe("Max slippage % for DEX quotes"),
     senderAddress: z.string().optional().describe("Sender wallet address (required for DEX)"),
     receiverAddress: z.string().optional().describe("Receiver wallet address"),
-    sort: z.enum(["amountOut", "amountOutUsd", "duration"]).optional().describe("Sort quotes by"),
+    sort: z.enum(["amountOut", "amountOutUsd", "amountIn", "duration"]).optional().describe("Sort quotes by"),
     sortOrder: z.enum(["asc", "desc"]).optional().describe("Sort direction"),
+    swaps: z.array(z.string()).optional().describe("Only quote these providers, by shortName from getSwapProviders (e.g. ['cn','se']). Omit for all."),
+    rotatePayoutWallets: z.boolean().optional().describe("Rotate payout wallets for better privacy. CEX quotes only."),
+    deviationThreshold: z.number().min(0).max(100).optional().describe("Max price deviation % when rotating wallets (default 5)."),
+    rotationLookback: z.number().int().min(1).max(100).optional().describe("Recent orders to check for path rotation (default 10)."),
 });
 
 export const exchangeSchema = z.object({

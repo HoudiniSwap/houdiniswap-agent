@@ -139,6 +139,43 @@ describe("MCP Server", () => {
             const content = JSON.parse((result.content as any)[0].text);
             expect(content.quotes[0].quoteId).toBe("q1");
         });
+
+        // The skill documents these and builds interactions on them ("only use
+        // ChangeNow", the privacy rotation options). The API has always accepted
+        // them; the tool did not expose them, so the agent could not comply.
+        it("forwards the provider filter and rotation options to the API", async () => {
+            mockClient.mockGet("/quotes", { quotes: [] });
+            await mcpClient.callTool({
+                name: "getQuote",
+                arguments: {
+                    from: "tokenA",
+                    to: "tokenB",
+                    amount: 1,
+                    swaps: ["cn", "se"],
+                    rotatePayoutWallets: true,
+                    deviationThreshold: 3,
+                    rotationLookback: 20,
+                },
+            });
+            const call = mockClient.calls.find((c) => c.path === "/quotes");
+            expect(call?.data).toMatchObject({
+                swaps: ["cn", "se"],
+                rotatePayoutWallets: true,
+                deviationThreshold: 3,
+                rotationLookback: 20,
+            });
+        });
+
+        it("does not leak the client-side limitPerType to the API", async () => {
+            mockClient.mockGet("/quotes", { quotes: [] });
+            await mcpClient.callTool({
+                name: "getQuote",
+                arguments: { from: "a", to: "b", amount: 1, limitPerType: 2 },
+            });
+            const call = mockClient.calls.find((c) => c.path === "/quotes");
+            expect(call?.data).not.toHaveProperty("limitPerType");
+            expect(call?.data).not.toHaveProperty("verbose");
+        });
     });
 
     describe("createExchange", () => {

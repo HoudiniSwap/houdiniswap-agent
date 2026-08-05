@@ -56,6 +56,20 @@ describe("compactToken", () => {
         expect(out.hasDex).toBe(true);
     });
 
+    // The skill requires the agent to warn before swapping an unverified token.
+    // Stripping this field silently disabled that warning — a scam-token guard
+    // that could never fire. Caught by diffing raw vs shaped fields against the
+    // field names the skill actually references.
+    it("keeps `unverified`, which the scam-token warning depends on", () => {
+        const flagged = { ...token, unverified: true };
+        expect((compactToken(flagged) as Record<string, unknown>).unverified).toBe(true);
+    });
+
+    it("keeps `unverified` through a token list too", () => {
+        const out = compactTokenResult({ total: 1, tokens: [{ ...token, unverified: true }] }) as any;
+        expect(out.tokens[0].unverified).toBe(true);
+    });
+
     it("drops description, icon and market noise", () => {
         const out = compactToken(token) as Record<string, unknown>;
         expect(out.description).toBeUndefined();

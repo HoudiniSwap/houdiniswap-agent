@@ -103,9 +103,15 @@ Use the `swaps` parameter to include only specific providers:
 ```
 getQuote({ from, to, amount, swaps: ["cn", "el", "se"] })
 ```
-Provider shortNames: `cn` (ChangeNow), `el` (Exolix), `se` (StealthEx), `sz` (Swapuz), `le` (LetsExchange), `ch` (Changelly), `cl` (Changelly v2), `eb` (EasyBit), `sp` (Stealth Pay), `nx` (Nexchange), `cc` (CoinCarp), `qx` (QuickEx), etc.
+**Call `getSwapProviders` to get the shortNames — do not work from a memorised list.** Providers
+are added and removed regularly, and a hardcoded list goes stale silently: passing a shortName that
+no longer exists filters away every quote and looks like "no routes available".
 
-Use `getSwapProviders` to get the full list with shortNames.
+Common ones at the time of writing (verify with `getSwapProviders`): `cn` ChangeNow, `se` StealthEx,
+`ch` ChangeHero, `cl` Changelly, `eb` EasyBit, `nx` Nexchange, `sp` Swapter, `hu`/`tc` Verified
+Partner, `sxff` FixedFloat (CEX); `un` Uniswap, `jp` Jupiter, `rd` Raydium, `ps` PancakeSwap,
+`cs` CowSwap, `zx` 0x, `su` SushiSwap, `ad` Aerodrome, `dl` deBridge, `cf` ChainFlip, `wh` Wormhole,
+`mn` Mayan, `bg` Bungee, `ni` Near Intents (DEX).
 
 ### Sorting Quotes
 - `sort: "amountOut"` — **Best price** (default). Highest output amount.
