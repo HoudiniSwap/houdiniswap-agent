@@ -323,10 +323,14 @@ describe("MCP Server", () => {
             expect(getCalls.filter((c) => c.path === "/quotes")).toHaveLength(1);
             expect(postCalls.filter((c) => c.path === "/exchanges")).toHaveLength(1);
 
-            const content = JSON.parse((result.content as any)[0].text);
+            const text = (result.content as any)[0].text;
+            const content = JSON.parse(text);
             expect(content.success).toBe(true);
             expect(content.order.houdiniId).toBe("HOUDINI999");
             expect(content.order.depositAddress).toBe("bc1qdeposit...");
+            // This one kept emitting indented JSON after every other tool was
+            // switched over; a live run is what surfaced it.
+            expect(text).not.toContain("\n  ");
         });
 
         it("returns error when source token not found", async () => {
