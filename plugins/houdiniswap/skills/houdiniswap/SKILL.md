@@ -284,15 +284,32 @@ Allow the user to:
 
 ## Order Statuses
 
-| Status | Code | Meaning |
-|--------|------|---------|
-| WAITING | 0 | Order created, waiting for deposit |
-| CONFIRMING | 1 | Deposit received, confirming on-chain |
-| EXCHANGING | 2 | Swap in progress at the provider |
-| SENDING | 3 | Sending output to destination |
-| COMPLETED | 5 | Swap finished successfully |
-| FAILED | -1 | Swap failed (check order for reason) |
-| EXPIRED | -2 | Order expired (no deposit received in time) |
+**Read `displayStatus` or `statusLabel`, not the numeric `status`.** Every order response carries
+both, they are unambiguous, and misreporting a swap's outcome to the user is the worst mistake
+this agent can make. The numeric codes are listed only so you can recognise one if you see it.
+
+| Code | `statusLabel` | Meaning |
+|------|---------------|---------|
+| -2 | INITIALIZING | Order being set up |
+| -1 | NEW | Order created, not yet waiting on a deposit |
+| 0 | WAITING | Waiting for the user's deposit |
+| 1 | CONFIRMING | Deposit seen, confirming on-chain |
+| 2 | EXCHANGING | Swap in progress at the provider |
+| 3 | ANONYMIZING | Private swaps only — moving through the intermediate hop |
+| **4** | **FINISHED** | **Swap completed successfully** |
+| **5** | **EXPIRED** | **No deposit arrived in time — the swap did NOT happen** |
+| 6 | FAILED | Swap failed; check the order for the reason |
+| 7 | REFUNDED | Funds returned to the sender |
+| 8 | DELETED | Order removed |
+
+> ⚠️ **4 is success, 5 is expiry.** Do not report status 5 as completed. An earlier version of this
+> table had 5 as "COMPLETED", which would tell a user their swap succeeded when it had expired.
+
+`displayStatus` is the user-facing string and is the one to show: `WAITING_FOR_DEPOSIT`,
+`DEPOSIT_DETECTED`, `EXCHANGE_IN_PROGRESS`, `SENDING_TO_INTERMEDIARY`, `REACHED_INTERMEDIARY`,
+`INITIATING_SECOND_EXCHANGE`, `SECOND_EXCHANGE_IN_PROGRESS`, `SENDING_TO_RECEIVER`,
+`SWAP_COMPLETED`, `EXPIRED`, `FAILED`, `REFUNDED`, `DELETED`. The four `*_INTERMEDIARY` /
+`*_SECOND_EXCHANGE` values only occur on private (2-hop) swaps.
 
 ## x402 Costs
 
