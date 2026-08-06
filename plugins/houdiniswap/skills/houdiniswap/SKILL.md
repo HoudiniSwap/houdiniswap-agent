@@ -23,7 +23,7 @@ HoudiniSwap supports three swap types. **Always ask the user which type they wan
 - **How**: `getQuote` with `types=["private"]` → `createExchange` with `quoteId` and `addressTo`
 - **Requires**: Only a destination address. Same UX as standard.
 - **Best for**: Privacy-focused users who want unlinkable swaps
-- **Privacy**: High — intermediate hop breaks the on-chain trail. The intermediate token is randomized from supported L1s for optimal speed and cost.
+- **Privacy**: High — intermediate hop breaks the on-chain trail. The intermediate token is selected from supported L1s by quoting several in parallel and taking the best result — it is a best-of selection, not a random one, so do not describe it to the user as randomised.
 
 ### 3. DEX (On-Chain)
 - **What**: Direct on-chain swap through decentralized protocols (Uniswap, Jupiter, Raydium, DLN Bridge, etc.)
@@ -38,7 +38,7 @@ HoudiniSwap supports three swap types. **Always ask the user which type they wan
 - **Requires**: Connected wallet with `addressFrom`. User must sign transactions.
 - **Best for**: Same-chain swaps, DeFi users, full self-custody
 - **Note**: Requires `slippage` parameter (default varies by DEX)
-- **IMPORTANT — Signing**: The MCP server's x402 private key is for USDC API payments ONLY. **Never use it to sign DEX transactions.** DEX tools return unsigned transaction data (`to`, `data`, `value`, `gasLimit`) which the user must sign and submit externally.
+- **IMPORTANT — Signing**: The MCP server's x402 private key is for USDC API payments ONLY. **Never use it to sign DEX transactions.** DEX tools return unsigned transaction data which the user must sign and submit externally. The shape is chain-dependent: EVM routes give `{to, data, value, gasLimit}`, while Solana (Jupiter) returns a hex-encoded serialized transaction in `metadata.data`, and Sui/TON/Bitcoin differ again.
 - **How users sign DEX transactions**:
   - **Browser**: MetaMask, Rabby, or any injected wallet
   - **Mobile**: WalletConnect QR code (future feature)
@@ -74,7 +74,7 @@ Tether (USDT) on BNB Smart Chain
 
 Rules:
 - Format: **`Name (SYMBOL) on ChainName`**
-- Always show the contract `address` if it exists (null = native token)
+- Always show the contract `address` if it exists. For native tokens the key is **absent** (not null) — the shaping drops null values, so test with `address === undefined`, not `=== null`
 - Show `price` in USD if available
 - Flag `mainnet` and `unverified` status
 - If the search returns multiple tokens with the same symbol, **list all of them** and ask the user to pick:
@@ -101,8 +101,12 @@ Which token did you mean? (Enter 1, 2, or 3)
 ### Filtering Providers
 Use the `swaps` parameter to include only specific providers:
 ```
-getQuote({ from, to, amount, swaps: ["cn", "el", "se"] })
+getQuote({ from, to, amount, swaps: ["cn", "se"] })
 ```
+> **Private quotes carry no `swap` or `swapName` at all.** Provider identity is stripped from
+> anonymous 2-hop routes by design — naming the hops would undo the privacy. Do not treat a missing
+> `swap` on a private quote as an error, and do not try to render a provider name for one.
+
 > ⚠️ **Before calling `createExchange`, check that the chosen quote's `swap` field matches what the
 > user asked for.** Ordering from the wrong provider cannot be undone. This is not hypothetical: a
 > `swaps: ["su"]` request once came back led by PancakeSwap because an older server build dropped
@@ -111,7 +115,7 @@ getQuote({ from, to, amount, swaps: ["cn", "el", "se"] })
 
 **Call `getSwapProviders` to get the shortNames — do not work from a memorised list.** Providers
 are added and removed regularly, and a hardcoded list goes stale silently: passing a shortName that
-no longer exists filters away every quote and looks like "no routes available".
+no longer exists is rejected with a 422 validation error, not silently ignored — so an unexpected 422 on getQuote is worth checking against getSwapProviders.
 
 Common ones at the time of writing (verify with `getSwapProviders`): `cn` ChangeNow, `se` StealthEx,
 `ch` ChangeHero, `cl` Changelly, `eb` EasyBit, `nx` Nexchange, `sp` Swapter, `hu`/`tc` Verified
@@ -140,7 +144,7 @@ Partner, `sxff` FixedFloat (CEX); `un` Uniswap, `jp` Jupiter, `rd` Raydium, `ps`
 | `getTokens` | Search by `symbol`, `chain`, `address`, `term`. Use `hasCex`/`hasDex` filters. **Always use the `id` field from results**, never symbols. Prefer tokens with `mainnet: true`. |
 | `getChains` | List blockchains. Filter with `hasCex`, `hasDex`, `kind`. |
 | `getSwapProviders` | List all providers with shortNames for filtering. |
-| `getMinMax` | Check bounds before quoting. Uses `tokenIdFrom`/`tokenIdTo`. Returns `{ cex, dex, private }` with min/max for each type. |
+| `getMinMax` | Check bounds before quoting. Uses `tokenIdFrom`/`tokenIdTo`. Returns `{ cex, dex, private }`, and **any bucket can be `null`** when no route of that type exists — always guard before reading `.min`. Each bucket also carries `minOut`/`maxOut`. |
 
 ### Quoting
 | Tool | Description |
@@ -150,9 +154,9 @@ Partner, `sxff` FixedFloat (CEX); `un` Uniswap, `jp` Jupiter, `rd` Raydium, `ps`
 ### Exchange
 | Tool | Description |
 |------|-------------|
-| `createExchange` | Create order from `quoteId`. Params: `addressTo` (required), `addressFrom` (required for DEX), `signatures` (DEX permit), `destinationTag` (XRP/XLM memo). Returns order with deposit address. |
+| `createExchange` | Create order from `quoteId`. Params: `addressTo` (required), `addressFrom` (required for DEX), `signatures` (DEX permit), `destinationTag` (XRP/XLM memo), `refundAddress` + `refundExtraId` (**required when the quote was created with `fixed: true`** — otherwise a 422). Returns order with deposit address. |
 | `getOrder` | Get order by `houdiniId`. Shows status, deposit address, tx hashes. |
-| `getOrders` | List orders. Filter by `status`, `from`/`to` (ISO dates — **not** `dateFrom`/`dateTo`, which the API ignores), `anonymous`, `inTokenId`, `outTokenId`, `multiId`; sort with `sortBy`/`sortOrder`. |
+| `getOrders` | List orders. Filter by `status`, `from`/`to` (ISO dates — **not** `dateFrom`/`dateTo`, which the API ignores), `anonymous`, `inTokenId`, `outTokenId`, `multiId`; sort with `sortBy`/`sortOrder`. **Only the last 48 hours are queryable** — an earlier `from` is silently clamped, with no error. |
 
 ### DEX-Specific
 | Tool | Description |
@@ -189,18 +193,44 @@ Partner, `sxff` FixedFloat (CEX); `un` Uniswap, `jp` Jupiter, `rd` Raydium, `ps`
 ```
 
 ### DEX Swap (Requires Wallet)
+
+`dexApprove` defaults to `usePermit: true`, and the two paths diverge completely.
+Check which one you got before doing anything else — it returns
+`{ approvals: [...], signatures: [...] }` and only one of the two is populated.
+
 ```
 1. getTokens (find tokens)
 2. getQuote({ from, to, amount, types: ["dex"], senderAddress: "0x...", slippage: 1 })
-3. dexCheckAllowance({ quoteId, addressFrom: "0x..." })
-   → If not sufficient:
-     dexApprove({ quoteId, addressFrom: "0x..." })
-     → User signs approval tx
-4. createExchange({ quoteId, addressTo: "0x...", addressFrom: "0x..." })
-   → User signs swap tx
-5. dexConfirmTx({ id: houdiniId, txHash: "0x..." })
-6. getOrder(houdiniId) → Track completion
+3. dexCheckAllowance({ quoteId, addressFrom: "0x..." })   → returns a bare true/false
+                                                            (true = sufficient, nothing to do)
+   → If false: dexApprove({ quoteId, addressFrom: "0x..." })
+
+4a. PERMIT PATH — signatures[] is non-empty, approvals[] is empty.
+    Nothing goes on-chain. The user signs the EIP-712 typed data in their wallet,
+    and the signature is passed to createExchange:
+      createExchange({ quoteId, addressTo, addressFrom,
+                       signatures: [{ signature: "0x...", key: "<signatures[0].key>" }] })
+    If signatures[0].type === "CHAINED", call dexChainSignatures repeatedly
+    (passing previousSignature, signatureKey, signatureStep) until the chain
+    completes, then pass the collected signatures to createExchange.
+
+4b. APPROVAL PATH — approvals[] is non-empty (or usePermit: false was requested).
+    The user signs and submits each approval transaction on-chain. Poll
+    dexApprove until it returns an empty approvals list, then:
+      createExchange({ quoteId, addressTo, addressFrom })
+
+5. User signs the swap tx from the returned metadata (to/data/value)
+6. dexConfirmTx({ id: houdiniId, txHash: "0x..." })       → returns a bare true/false
+7. getOrder(houdiniId) → Track completion
 ```
+
+Omitting `signatures` on the permit path is a dead end: the approval never
+reaches the router and the swap cannot execute.
+
+`metadata`'s shape is chain-dependent. EVM routes return `{to, data, value,
+gasLimit, ...}`. Solana (Jupiter) returns a hex-encoded serialized transaction in
+`metadata.data` and nothing else; Sui, TON and Bitcoin differ again. Present what
+is actually there rather than assuming the EVM fields.
 
 ### Quick Swap (Simple)
 ```
@@ -211,6 +241,15 @@ swap({
 })
 → Returns order with deposit address in one call
 ```
+
+> ⚠️ **`swap` is exempt from Critical Rules 5-7 and can create a private order.**
+> It picks the token and the route itself and creates the order in a single call,
+> so there is no menu, no unverified-token warning and no price-impact check — and
+> it returns neither `amountOutUsd` (so impact cannot be computed after the fact)
+> nor `displayStatus` (only the numeric `status`). It also quotes without a
+> `types` filter and takes the best non-DEX route, so **if a private route wins it
+> creates an anonymous 2-hop order without asking.** Use the step-by-step flow
+> whenever the user has not explicitly accepted those trade-offs.
 
 ## Safety Warnings
 
@@ -266,7 +305,7 @@ Format each route showing:
 - **Output amount** with symbol (from `amountOut`)
 - **USD value** (from `amountOutUsd`)
 - **ETA** (from `duration` in minutes)
-- **Fee** (from `feeUsd` + `gasUsd` if applicable)
+- **Fee** (from `feeUsd` + `gasUsd`) — **DEX quotes only.** CEX quotes carry no fee field at all, so omit the column for them rather than inventing a figure
 - **Price impact warning** if > 2%
 
 If the user says a number, use that quote's `quoteId` for the exchange.
@@ -275,7 +314,7 @@ Allow the user to:
 - `"sort by fastest"` → re-query with `sort: "duration", sortOrder: "asc"`
 - `"sort by cheapest"` → re-query with `sort: "amountOut", sortOrder: "desc"` (default)
 - `"only use ChangeNow"` → re-query with `swaps: ["cn"]`
-- `"exclude EasyBit"` → re-query excluding that provider
+- `"exclude EasyBit"` → **there is no exclude parameter.** `swaps` is an allowlist only, so either re-query listing every provider the user still wants, or filter the returned quotes yourself and say which you dropped
 - `"show DEX routes"` → re-query with `types: ["dex"]`
 - `"show private routes"` → re-query with `types: ["private"]`
 
@@ -299,7 +338,7 @@ Allow the user to:
 9. **For DEX**: always require `addressFrom` (sender wallet) and `senderAddress` in quotes
 10. **For chains needing memo/tag** (XRP, XLM, ATOM): always ask for and pass `destinationTag`
 11. **Fallback**: CEX exchanges auto-fallback to the next best provider if the primary one fails
-12. **Quote expiry**: Quotes expire after ~60 seconds — create the exchange promptly after getting a quote
+12. **Quote expiry**: CEX quotes expire after ~60 seconds. DEX quotes on approval-required chains get up to **10 minutes**, which is what makes the quote → allowance → approve → user-signs → createExchange sequence feasible. Prefer the quote's own `validUntil` when present rather than assuming either number. After ordering, read `swapName` on the returned **order**: a failing provider falls back to the next best route, so the order is the only place the provider that actually executed appears
 13. **Never expose** private keys, API secrets, or internal partner IDs to the user
 
 ## Order Statuses

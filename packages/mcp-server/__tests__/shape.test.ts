@@ -396,3 +396,69 @@ describe("asToolResult", () => {
         expect(text).not.toContain("\n");
     });
 });
+
+describe("private quotes and the swaps re-filter", () => {
+    // Private (anonymous 2-hop) quotes carry no `swap`/`swapName` — the API
+    // strips provider identity deliberately, because naming the hops would undo
+    // the privacy. Matching on `swap` deleted every private route whenever a
+    // swaps filter was passed, then blamed the API for ignoring the filter.
+    const mixed = {
+        total: 4,
+        quotes: [
+            { quoteId: "a", type: "standard", swap: "cn", swapName: "ChangeNow", amountOut: 9 },
+            { quoteId: "b", type: "standard", swap: "se", swapName: "StealthEx", amountOut: 8 },
+            { quoteId: "c", type: "private", amountOut: 7 },
+            { quoteId: "d", type: "private", amountOut: 6 },
+        ],
+    };
+
+    it("keeps private routes when a swaps filter is applied", () => {
+        const out = compactQuoteResult(mixed, 5, ["cn"]) as any;
+        const types = out.quotes.map((q: any) => q.type);
+        expect(types.filter((t: string) => t === "private")).toHaveLength(2);
+        expect(out.quotes.filter((q: any) => q.type === "standard").every((q: any) => q.swap === "cn")).toBe(true);
+    });
+
+    it("does not claim the API ignored the filter when only private routes lack swap", () => {
+        const onlyPrivate = { total: 2, quotes: [mixed.quotes[2], mixed.quotes[3]] };
+        const out = compactQuoteResult(onlyPrivate, 5, ["cn"]) as any;
+        expect(out.quotes).toHaveLength(2);
+        expect(out.swapsFilteredClientSide).toBeUndefined();
+    });
+
+    it("still filters standard routes that do not match", () => {
+        const out = compactQuoteResult(mixed, 5, ["cn"]) as any;
+        expect(out.quotes.some((q: any) => q.swap === "se")).toBe(false);
+        expect(out.swapsFilteredClientSide).toBe(true);
+    });
+});
+
+describe("fields the skill depends on", () => {
+    it("keeps amountInUsd so price impact does not need a cached price", () => {
+        const out = compactQuoteResult(
+            { total: 1, quotes: [{ quoteId: "q", type: "dex", amountIn: 5, amountInUsd: 4.99, amountOut: 1, amountOutUsd: 4.98 }] },
+            5,
+        ) as any;
+        expect(out.quotes[0].amountInUsd).toBe(4.99);
+    });
+
+    it("keeps the fixed-rate flags that createExchange validates on", () => {
+        const out = compactQuoteResult(
+            { total: 1, quotes: [{ quoteId: "q", type: "standard", fixed: true, requiresRefundAddress: true, validUntil: "2026-01-01T00:00:00Z" }] },
+            5,
+        ) as any;
+        expect(out.quotes[0].fixed).toBe(true);
+        expect(out.quotes[0].requiresRefundAddress).toBe(true);
+        expect(out.quotes[0].validUntil).toBe("2026-01-01T00:00:00Z");
+    });
+
+    it("lifts the chain display name the token format requires", () => {
+        const out = compactToken({
+            id: "t", symbol: "ETH", name: "Ethereum", chain: "ethereum",
+            chainData: { name: "Ethereum Mainnet", chainId: 1, description: "…" },
+        }) as any;
+        expect(out.chainName).toBe("Ethereum Mainnet");
+        expect(out.chainId).toBe(1);
+        expect(out.chainData).toBeUndefined();
+    });
+});

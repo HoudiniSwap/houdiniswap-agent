@@ -45,6 +45,12 @@ export const compactToken = (token: unknown): unknown => {
     const out = pick(source, TOKEN_KEYS);
     const chainData = source.chainData as Json | undefined;
     if (chainData?.chainId !== undefined) out.chainId = chainData.chainId;
+    // `token.chain` is the chain's shortName ("ethereum", "bsc"). The skill
+    // mandates displaying "Name (SYMBOL) on ChainName" — "on Ethereum Mainnet",
+    // not "on ethereum" — and the display name only exists here. Without it the
+    // agent has to spend a separate getChains call to render the format it is
+    // told to use.
+    if (typeof chainData?.name === "string") out.chainName = chainData.name;
     return out;
 };
 
@@ -114,6 +120,20 @@ const QUOTE_KEYS = [
     // `gas` alone is gas units, not USD.
     "feeUsd",
     "gasUsd",
+    // The exact input value. Without it the skill's price-impact rule has to
+    // reconstruct it as `amount * token.price`, which is less accurate and
+    // cannot run at all when a token has no price — and `price` is nullable.
+    "amountInUsd",
+    // A route needing a refund address falls through to another provider if one
+    // is not supplied, so an agent that cannot see this silently gets a
+    // different provider than the one it chose.
+    "requiresRefundAddress",
+    // Whether a DEX route can be funded without a connected wallet.
+    "depositAddressSupported",
+    // Fixed-rate routes require a refundAddress at createExchange; without these
+    // the agent cannot tell which quotes those are and hits an opaque 422.
+    "fixed",
+    "validUntil",
     "min",
     "max",
     "rewardsAvailable",
@@ -156,7 +176,14 @@ export const compactQuoteResult = (
     let filteredClientSide = false;
     if (requestedSwaps?.length) {
         const wanted = new Set(requestedSwaps);
-        const matching = quotes.filter((q) => typeof q.swap === "string" && wanted.has(q.swap));
+        // Private (anonymous 2-hop) quotes carry no `swap`/`swapName` at all —
+        // the API strips provider identity from them deliberately, since naming
+        // the hops would undo the privacy. Matching on `swap` therefore deleted
+        // every private route whenever a `swaps` filter was passed, and then
+        // reported that the API had ignored the filter. It had not; this did.
+        const matching = quotes.filter(
+            (q) => q.type === "private" || (typeof q.swap === "string" && wanted.has(q.swap)),
+        );
         if (matching.length !== quotes.length) {
             filteredClientSide = true;
             quotes = matching;
