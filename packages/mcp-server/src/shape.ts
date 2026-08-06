@@ -109,10 +109,22 @@ const QUOTE_KEYS = [
     "netAmountOut",
     "duration",
     "gas",
+    // DEX quotes carry these; the skill's route menu is specified to show
+    // "Fee (from feeUsd + gasUsd)" and could not, because they were stripped.
+    // `gas` alone is gas units, not USD.
+    "feeUsd",
+    "gasUsd",
     "min",
     "max",
     "rewardsAvailable",
     "requiresApproval",
+    // Whether this route offers the EIP-2612 permit path, which decides between
+    // dexApprove's on-chain approval and the signature chain.
+    "supportsSignatures",
+    // Why a route was excluded — without these, "no routes available" is
+    // undiagnosable.
+    "filtered",
+    "filteredReason",
     "error",
 ] as const;
 

@@ -14,8 +14,8 @@ export const registerChainTools = (server: McpServer, client: HoudiniClient) => 
             name: z.string().optional().describe("Search by chain name"),
             chainId: z.number().int().optional().describe("Filter by EVM chain ID (e.g. 8453 for Base)"),
             memoNeeded: z.boolean().optional().describe("Only chains that require a memo/destination tag"),
-            page: z.number().int().min(1).default(1).optional(),
-            pageSize: z.number().int().min(1).max(100).default(100).optional(),
+            page: z.number().int().min(1).optional().default(1),
+            pageSize: z.number().int().min(1).max(100).optional().default(100),
             verbose: z.boolean().optional().describe("Return the full unfiltered API response"),
         },
         async ({ verbose, ...params }) => {

@@ -33,7 +33,7 @@ export const registerQuoteTools = (server: McpServer, client: HoudiniClient) => 
             inLegExcludedSwaps: z.array(z.string()).optional().describe("Private swaps only: blocklist of providers for the first hop."),
             outLegIncludedSwaps: z.array(z.string()).optional().describe("Private swaps only: allowlist of providers for the second hop."),
             outLegExcludedSwaps: z.array(z.string()).optional().describe("Private swaps only: blocklist of providers for the second hop."),
-            limitPerType: z.number().int().min(1).max(50).default(5).optional().describe("Best quotes to keep per type (default 5). A pair can return 100+ quotes; the response reports how many were omitted."),
+            limitPerType: z.number().int().min(1).max(50).optional().default(5).describe("Best quotes to keep per type (default 5). A pair can return 100+ quotes; the response reports how many were omitted."),
             verbose: z.boolean().optional().describe("Return the full unfiltered API response"),
         },
         async ({ limitPerType, verbose, ...params }) => {

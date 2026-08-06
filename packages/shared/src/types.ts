@@ -20,6 +20,12 @@ export interface ApiError {
     code?: string;
     /** Absent on some responses — see `code`. */
     message?: string;
+    /**
+     * x402 reports why a payment was refused here rather than in `message`
+     * (e.g. "invalid_exact_evm_transaction_failed"). Without it, a settlement
+     * collision and an unfunded wallet are indistinguishable.
+     */
+    error?: string;
     requestId?: string;
     fields?: Record<string, { message: string; value?: unknown }>;
 }

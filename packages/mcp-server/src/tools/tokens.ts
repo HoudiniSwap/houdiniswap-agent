@@ -20,8 +20,8 @@ export const registerTokenTools = (server: McpServer, client: HoudiniClient) => 
             // warning could never fire, because no such token was reachable.
             unverified: z.boolean().optional().describe("Include unverified tokens (excluded by default). Warn the user before swapping any token with unverified: true."),
             hasSelfPrivate: z.boolean().optional().describe("Only tokens supporting private (anonymous 2-hop) swaps"),
-            page: z.number().int().min(1).default(1).optional().describe("Page number"),
-            pageSize: z.number().int().min(1).max(100).default(20).optional().describe("Results per page"),
+            page: z.number().int().min(1).optional().default(1).describe("Page number"),
+            pageSize: z.number().int().min(1).max(100).optional().default(20).describe("Results per page"),
             verbose: z.boolean().optional().describe("Return the full unfiltered API response"),
         },
         async ({ verbose, ...params }) => {

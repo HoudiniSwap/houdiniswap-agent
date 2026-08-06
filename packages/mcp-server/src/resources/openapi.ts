@@ -39,21 +39,29 @@ export const registerResources = (server: McpServer, client: HoudiniClient) => {
                 text: [
                     "HoudiniSwap x402 Pay-Per-Request Pricing (USDC)",
                     "",
+                    // Mirrors routeOperationMappings / publicRouteMappings in the
+                    // backend's src/tsoa/x402Config.ts. This previously listed
+                    // GET /health and GET /openapi.json as free — neither is a
+                    // public route — and omitted GET /status, which is the only
+                    // one that actually is.
                     "Read operations ($0.0001):",
-                    "  GET /tokens, GET /chains, GET /swaps, GET /minMax, GET /rateLimits",
+                    "  GET /tokens, GET /tokens/{id}, GET /chains, GET /swaps, GET /minMax, GET /rateLimits",
                     "  POST /dex/approve, POST /dex/allowance, POST /dex/chainSignatures",
                     "",
                     "Quote operations ($0.001):",
-                    "  GET /quotes",
+                    "  GET /quotes, GET /quotes/byChainAddress",
                     "",
                     "Exchange operations ($0.01):",
                     "  POST /exchanges, POST /dex/confirmTx",
+                    "  POST /exchanges/multi, POST /exchanges/multi/recovery,",
+                    "  POST /exchanges/multi/{id}/tx/build, GET /exchanges/multi/{id}/tx",
                     "",
                     "Status operations ($0.0001):",
-                    "  GET /orders, GET /orders/{id}",
+                    "  GET /orders, GET /orders/{id}, GET /exchanges/multi/{id}",
                     "",
                     "Free endpoints (no payment required):",
-                    "  GET /health, GET /openapi.json",
+                    "  GET /status — the only unpaid route. It is not exposed as a tool,",
+                    "  so every tool call costs at least $0.0001 and a funded wallet is required.",
                     "",
                     "Rate limits: 60 requests/minute per payer address",
                     "Network: Base (eip155:8453) — USDC payments",

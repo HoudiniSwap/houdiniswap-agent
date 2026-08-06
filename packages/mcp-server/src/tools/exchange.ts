@@ -27,6 +27,7 @@ export const registerExchangeTools = (server: McpServer, client: HoudiniClient) 
                 .describe("EIP-712 signatures from dexApprove's permit path (DEX only)"),
             refundAddress: z.string().optional().describe("Address to refund to if a fixed-rate swap fails"),
             refundExtraId: z.string().optional().describe("Memo/tag for the refund address, on chains that need one"),
+            walletInfo: z.string().max(256).optional().describe("Free-text wallet identifier recorded on the order"),
             verbose: z.boolean().optional().describe("Return the full unfiltered API response"),
         },
         async ({ verbose, ...params }) => {

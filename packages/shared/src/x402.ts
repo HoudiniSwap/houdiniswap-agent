@@ -10,6 +10,30 @@ export const createX402Fetch = (privateKey: `0x${string}`): typeof fetch => {
 
     let lastPaymentTime = 0;
     const MIN_PAYMENT_INTERVAL_MS = 5000;
+    const PAYMENT_TIMEOUT_MS = 60_000;
+
+    /**
+     * Because payments are serialised, a request that never settles blocks every
+     * payment behind it — permanently, and with nothing logged. A bound turns
+     * that into one failed call instead of a server that silently stops paying
+     * for anything.
+     */
+    const withTimeout = async <T>(work: Promise<T>, stage: string): Promise<T> => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+            return await Promise.race([
+                work,
+                new Promise<never>((_, reject) => {
+                    timer = setTimeout(
+                        () => reject(new Error(`x402 payment timed out after ${PAYMENT_TIMEOUT_MS}ms while ${stage}`)),
+                        PAYMENT_TIMEOUT_MS,
+                    );
+                }),
+            ]);
+        } finally {
+            if (timer) clearTimeout(timer);
+        }
+    };
 
     /**
      * Payments are settled on-chain by the facilitator, and two settlements from
@@ -40,14 +64,29 @@ export const createX402Fetch = (privateKey: `0x${string}`): typeof fetch => {
                 undefined,
             );
 
-            const payload = await client.createPaymentPayload(paymentRequired);
+            // Signing can stall on the facilitator just as the retry can, so both
+            // are bounded.
+            const payload = await withTimeout(
+                client.createPaymentPayload(paymentRequired),
+                "signing the payment",
+            );
             const paymentHeaders = httpClient.encodePaymentSignatureHeader(payload);
 
+            // Aborting actually closes the socket; the race alone would leave it
+            // open and still consuming a connection.
+            const controller = new AbortController();
             try {
-                return await fetch(url, {
-                    ...init,
-                    headers: { ...init?.headers, ...paymentHeaders },
-                });
+                return await withTimeout(
+                    fetch(url, {
+                        ...init,
+                        headers: { ...init?.headers, ...paymentHeaders },
+                        signal: controller.signal,
+                    }),
+                    "submitting the paid request",
+                );
+            } catch (err) {
+                controller.abort();
+                throw err;
             } finally {
                 // After the retry resolves, so the next payment waits out this
                 // settlement rather than starting the clock at signing time.
