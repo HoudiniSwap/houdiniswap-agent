@@ -529,6 +529,25 @@ describe("MCP Server", () => {
             expect(text).toContain("60 requests/minute");
         });
 
+        // It previously advertised GET /health and GET /openapi.json as free.
+        // Neither appears in the backend's publicRouteMappings; GET /status is
+        // the only unpaid route, and it was the one missing.
+        it("names the only genuinely free route and no invented ones", async () => {
+            const result = await mcpClient.readResource({ uri: "houdiniswap://pricing" });
+            const text = (result.contents[0] as any).text as string;
+            expect(text).toContain("GET /status");
+            expect(text).not.toContain("/health");
+            expect(text).not.toContain("/openapi.json");
+        });
+
+        it("lists the priced routes that were omitted", async () => {
+            const result = await mcpClient.readResource({ uri: "houdiniswap://pricing" });
+            const text = (result.contents[0] as any).text as string;
+            for (const route of ["GET /tokens/{id}", "GET /quotes/byChainAddress", "POST /exchanges/multi"]) {
+                expect(text, `pricing should mention ${route}`).toContain(route);
+            }
+        });
+
         it("returns openapi spec", async () => {
             const result = await mcpClient.readResource({ uri: "houdiniswap://openapi" });
             const text = (result.contents[0] as any).text as string;
