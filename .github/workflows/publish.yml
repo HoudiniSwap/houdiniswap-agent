@@ -28,6 +28,10 @@ concurrency:
 
 jobs:
   publish:
+    # `on: push` is already restricted to main, but workflow_dispatch runs
+    # against whatever ref is selected — without this, dispatching from a branch
+    # publishes that branch's code as `latest`.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       id-token: write # required for OIDC trusted publishing
@@ -44,7 +48,9 @@ jobs:
           cache: npm
 
       - name: Upgrade npm to a version that supports trusted publishing
-        run: npm install -g npm@latest
+        # Pinned to a major: trusted publishing needs >= 11.5.1, and a future npm
+        # major should not land in the release path unannounced.
+        run: npm install -g npm@^11
 
       - name: Install dependencies
         run: npm ci
@@ -62,6 +68,23 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Distinguish "package not published yet" from "the registry lookup
+          # failed". Mapping both to an empty string turns a network blip on an
+          # unchanged package into an attempted re-publish, which 403s and kills
+          # the whole release under `set -e`.
+          remote_version_of() {
+            local name="$1" out status
+            out=$(npm view "$name" version 2>&1) && { echo "$out"; return 0; }
+            status=$?
+            if echo "$out" | grep -q "E404"; then
+              echo ""
+              return 0
+            fi
+            echo "Registry lookup for $name failed (not a 404):" >&2
+            echo "$out" >&2
+            return "$status"
+          }
+
           publish_if_changed() {
             local dir="$1"
             cd "$dir"
@@ -69,10 +92,17 @@ jobs:
             local name local_version remote_version
             name=$(node -p "require('./package.json').name")
             local_version=$(node -p "require('./package.json').version")
-            remote_version=$(npm view "$name" version 2>/dev/null || echo "")
+            remote_version=$(remote_version_of "$name")
 
             if [ "$local_version" = "$remote_version" ]; then
               echo "· $name@$local_version already on the registry — skipping"
+            elif [ -n "$remote_version" ] && [ "$(printf '%s\n%s\n' "$local_version" "$remote_version" | sort -V | tail -1)" != "$local_version" ]; then
+              # `npm publish` without --tag always repoints `latest` at whatever it
+              # just published, so publishing a version BELOW latest silently
+              # downgrades every consumer. Only ever move forwards.
+              echo "✗ $name: local $local_version is older than the published $remote_version." >&2
+              echo "  Publishing it would move the 'latest' tag backwards. Refusing." >&2
+              exit 1
             else
               echo "→ publishing $name@$local_version (registry has ${remote_version:-nothing})"
               npm publish
@@ -82,6 +112,28 @@ jobs:
             cd - > /dev/null
           }
 
+          # mcp-server and ai-tools import agent-shared at runtime, so a range
+          # they declare must be resolvable on the registry by the time they are
+          # published. If a shared bump is dropped in a rebase while the range
+          # bump survives, shared matches the registry and is skipped, and the
+          # dependents ship requiring a version that does not exist — every
+          # `npx -y @houdiniswap/mcp-server` then fails with ERR_MODULE_NOT_FOUND
+          # while the workflow stays green.
+          assert_shared_range_resolvable() {
+            local dir="$1" range
+            range=$(node -p "require('./$dir/package.json').dependencies['@houdiniswap/agent-shared'] || ''")
+            [ -n "$range" ] || return 0
+            if ! npm view "@houdiniswap/agent-shared@$range" version >/dev/null 2>&1; then
+              echo "✗ $dir depends on @houdiniswap/agent-shared@$range, which nothing on the registry satisfies." >&2
+              echo "  Publishing it would ship a package whose dependency cannot be installed." >&2
+              echo "  A shared version bump was probably lost while the range bump survived." >&2
+              exit 1
+            fi
+            echo "· $dir's agent-shared@$range resolves"
+          }
+
           publish_if_changed packages/shared
+          assert_shared_range_resolvable packages/mcp-server
+          assert_shared_range_resolvable packages/ai-tools
           publish_if_changed packages/mcp-server
           publish_if_changed packages/ai-tools

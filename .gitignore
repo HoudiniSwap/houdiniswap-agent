@@ -4,3 +4,6 @@ dist/
 *.tsbuildinfo
 .env
 .env.local
+
+# Scratch files from parallel review agents — never part of a release
+zzadv-*

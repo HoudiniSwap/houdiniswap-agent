@@ -60,7 +60,7 @@ claude mcp add houdiniswap --env HOUDINI_X402_PRIVATE_KEY=0x... -- npx -y @houdi
 /plugin marketplace add HoudiniSwap/houdiniswap-agent
 /plugin install houdiniswap@houdiniswap
 ```
-Installs the HoudiniSwap swap-agent skill **and** wires up the MCP server. Claude Code prompts for your x402 wallet key at enable time and stores it in the OS keychain.
+Installs the HoudiniSwap swap-agent skill **and** wires up the MCP server. Claude Code prompts for your x402 wallet key at enable time and stores it outside `settings.json`. Where exactly depends on the platform — on Linux it is written to `~/.claude/.credentials.json` (mode 0600, plaintext), not an OS keychain. Treat the machine as able to read the key, and use a wallet funded with only what you intend to spend.
 
 A funded wallet is **required** — the API is pay-per-call and only `GET /status` is free, so without a key every tool returns 402. Fund a wallet with a couple of dollars of USDC on Base and you're set; no gas needed, payments are gasless EIP-3009 authorizations settled by the facilitator.
 
@@ -131,10 +131,12 @@ The x402 protocol enables pay-per-request API access with USDC on Base. No accou
 | `HOUDINI_X402_PRIVATE_KEY` | One of these | — | EVM wallet private key for x402 payments |
 | `HOUDINI_API_KEY` | One of these | — | Partner API key (`id:secret`) |
 | `HOUDINI_PARTNER_ID` | One of these | — | Public partner ID (read-only access) |
-
-None is strictly required — the server starts without any of them, but every tool then returns 402. Precedence is `HOUDINI_API_KEY` → `HOUDINI_X402_PRIVATE_KEY` → `HOUDINI_PARTNER_ID`.
 | `HOUDINI_API_URL` | No | `https://api-partner.houdiniswap.com/v2` | API base URL |
 | `PORT` | No | `8080` | HTTP transport port |
+
+None is strictly required — the server starts without any of them, but every tool then returns 402. Precedence is `HOUDINI_API_KEY` → `HOUDINI_X402_PRIVATE_KEY` → `HOUDINI_PARTNER_ID`.
+
+**Paid calls are spaced ~5 seconds apart.** The facilitator settles each payment on-chain and two settlements at once from the same wallet fail, so the client serialises them. A full swap flow takes 20-30 seconds; a single call that seems to hang for 5s is doing this, not stalling. Individual payments time out after 60s.
 
 ## Development
 

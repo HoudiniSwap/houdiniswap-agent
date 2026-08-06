@@ -1,6 +1,6 @@
 {
   "name": "@houdiniswap/ai-tools",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "HoudiniSwap tools for Vercel AI SDK — connect AI agents to 14 CEXes and 20+ DEXes",
   "type": "module",
   "license": "MIT",
@@ -42,7 +42,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@houdiniswap/agent-shared": "^0.1.4",
+    "@houdiniswap/agent-shared": "^0.1.5",
     "ai": "^6.0.0",
     "zod": "^3.24.0"
   },

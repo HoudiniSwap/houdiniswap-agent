@@ -2,7 +2,7 @@
   "mcpServers": {
     "houdiniswap": {
       "command": "npx",
-      "args": ["@houdiniswap/mcp-server"],
+      "args": ["-y", "@houdiniswap/mcp-server"],
       "env": {
         "HOUDINI_X402_PRIVATE_KEY": "0xYOUR_WALLET_PRIVATE_KEY"
       }

@@ -16,7 +16,7 @@ export const registerChainTools = (server: McpServer, client: HoudiniClient) => 
             memoNeeded: z.boolean().optional().describe("Only chains that require a memo/destination tag"),
             page: z.number().int().min(1).optional().default(1),
             pageSize: z.number().int().min(1).max(100).optional().default(100),
-            verbose: z.boolean().optional().describe("Return the full unfiltered API response"),
+            verbose: z.boolean().optional().describe("Return the full unfiltered API response. Raw pages are large — combine with a small pageSize (10 or less), or the response can exceed the client's tool-result limit and be discarded entirely."),
         },
         async ({ verbose, ...params }) => {
             const result = await client.get<ChainResult>("/chains", params);

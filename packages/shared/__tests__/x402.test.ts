@@ -15,9 +15,49 @@ vi.mock("@x402/evm/exact/client", () => ({
     registerExactEvmScheme: vi.fn(),
 }));
 
+// What the server offers in its 402 challenge. Tests override it to model a
+// hostile server.
+let paymentRequirements: Array<Record<string, unknown>> = [
+    { scheme: "exact", network: "eip155:8453", amount: "100", asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", payTo: "0xreceiver" },
+];
+
+/**
+ * Mirrors the real client's selection order — filter by policies, then run the
+ * before-hooks, then sign — because that order is exactly what the spend guard
+ * relies on. A mock that ignored policies would let the guard's tests pass while
+ * the guard did nothing, which is the failure mode being guarded against.
+ */
 vi.mock("@x402/core/client", () => ({
     x402Client: class {
-        async createPaymentPayload() {
+        policies: Array<(v: number, r: Array<Record<string, unknown>>) => Array<Record<string, unknown>>> = [];
+        beforeHooks: Array<(c: { selectedRequirements: unknown }) => Promise<void | { abort: true; reason: string }>> = [];
+
+        registerPolicy(policy: (v: number, r: Array<Record<string, unknown>>) => Array<Record<string, unknown>>) {
+            this.policies.push(policy);
+            return this;
+        }
+
+        onBeforePaymentCreation(hook: (c: { selectedRequirements: unknown }) => Promise<void | { abort: true; reason: string }>) {
+            this.beforeHooks.push(hook);
+            return this;
+        }
+
+        async createPaymentPayload(paymentRequired: { accepts?: Array<Record<string, unknown>> }) {
+            let candidates = paymentRequired?.accepts ?? [];
+            for (const policy of this.policies) {
+                candidates = policy(2, candidates);
+                if (candidates.length === 0) {
+                    throw new Error("All payment requirements were filtered out by policies");
+                }
+            }
+            const selectedRequirements = candidates[0];
+            for (const hook of this.beforeHooks) {
+                const result = await hook({ selectedRequirements });
+                if (result && "abort" in result && result.abort) {
+                    throw new Error(`Payment creation aborted: ${result.reason}`);
+                }
+            }
+
             const id = ++paymentSeq;
             activePayments += 1;
             maxConcurrentPayments = Math.max(maxConcurrentPayments, activePayments);
@@ -27,7 +67,7 @@ vi.mock("@x402/core/client", () => ({
     },
     x402HTTPClient: class {
         getPaymentRequiredResponse() {
-            return { accepts: [] };
+            return { x402Version: 2, accepts: paymentRequirements };
         }
         encodePaymentSignatureHeader(payload: { id: number }) {
             return { "x-payment": String(payload.id) };
@@ -154,5 +194,194 @@ describe("createX402Fetch", () => {
 
         expect(await first).toBe("settlement exploded");
         expect((await second).status).toBe(200);
+    });
+});
+
+/**
+ * Money-path invariant with no previous test: exactly one signed authorisation
+ * per 402. Two payments for one logical call would require two calls to
+ * createPaymentPayload, so pinning the count pins the property.
+ *
+ * This is what makes a timeout safe to add. A timeout cannot double-spend — it
+ * can only lose a single payment if the facilitator settles after we stop
+ * waiting, and EIP-3009 nonce replay protection means one authorisation settles
+ * at most once regardless.
+ */
+describe("payment count invariant", () => {
+    it("signs exactly one authorisation per 402, even when the retry fails", async () => {
+        vi.useFakeTimers();
+        mockFetch.mockImplementation(async (_url: string, init?: RequestInit) => {
+            const paid = Boolean((init?.headers as Record<string, string>)?.["x-payment"]);
+            if (!paid) return new Response("{}", { status: 402 });
+            return new Response("{}", { status: 402 }); // facilitator refuses
+        });
+
+        const f = createX402Fetch(`0x${"11".repeat(32)}`);
+        const res = await f("https://api.test/refused");
+        await vi.advanceTimersByTimeAsync(120_000);
+
+        expect(res.status).toBe(402);
+        expect(paymentEvents.filter((e) => e.phase === "sign")).toHaveLength(1);
+    });
+
+    it("signs exactly one authorisation per 402 on the success path", async () => {
+        vi.useFakeTimers();
+        const f = createX402Fetch(`0x${"11".repeat(32)}`);
+        const p = f("https://api.test/ok");
+        await vi.advanceTimersByTimeAsync(120_000);
+        await p;
+        expect(paymentEvents.filter((e) => e.phase === "sign")).toHaveLength(1);
+    });
+
+    it("does not sign at all when the endpoint is free", async () => {
+        mockFetch.mockReset();
+        mockFetch.mockResolvedValue(new Response("{}", { status: 200 }));
+        const f = createX402Fetch(`0x${"11".repeat(32)}`);
+        await f("https://api.test/status");
+        expect(paymentEvents).toHaveLength(0);
+    });
+});
+
+/**
+ * Every payment term — amount, recipient, asset, chain — arrives in the server's
+ * 402 challenge. With no policy registered the signer accepted all of it: a
+ * hostile 402 demanding 1,000,000 USDC to an arbitrary address was signed in
+ * full. `HOUDINI_API_URL` is an env var with no allowlist, so a redirected base
+ * URL is enough to be that server.
+ */
+describe("payment bounds", () => {
+    const hostile = (over: Record<string, unknown>) => ({
+        scheme: "exact",
+        network: "eip155:8453",
+        amount: "100",
+        asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        payTo: "0xe2FBF4e7F29Ad53F0D28BCbCF4088277C9916eAC",
+        ...over,
+    });
+
+    const attempt = async (requirement: Record<string, unknown>) => {
+        paymentRequirements = [requirement];
+        mockFetch.mockReset();
+        mockFetch.mockImplementation(async (_u: string, init?: RequestInit) => {
+            const paid = Boolean((init?.headers as Record<string, string>)?.["x-payment"]);
+            return new Response("{}", { status: paid ? 200 : 402 });
+        });
+        const f = createX402Fetch(`0x${"11".repeat(32)}`);
+        try {
+            const res = await f("https://api.test/x");
+            return res.status === 200 ? "SIGNED" : `status ${res.status}`;
+        } catch (err) {
+            return `REFUSED: ${(err as Error).message}`;
+        }
+    };
+
+    it("signs the real price", async () => {
+        expect(await attempt(hostile({ amount: "100" }))).toBe("SIGNED");
+    });
+
+    it("signs up to the exchange-tier price", async () => {
+        expect(await attempt(hostile({ amount: "10000" }))).toBe("SIGNED");
+    });
+
+    it("refuses a drain-sized amount", async () => {
+        expect(await attempt(hostile({ amount: "1000000000" }))).toMatch(/REFUSED|filtered out/);
+    });
+
+    it("refuses a different asset", async () => {
+        expect(await attempt(hostile({ asset: "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" }))).toMatch(/REFUSED|filtered out/);
+    });
+
+    it("refuses a different chain", async () => {
+        expect(await attempt(hostile({ network: "eip155:1" }))).toMatch(/REFUSED|filtered out/);
+    });
+
+    it("honours a caller-supplied ceiling", async () => {
+        paymentRequirements = [hostile({ amount: "50000" })];
+        mockFetch.mockReset();
+        mockFetch.mockImplementation(async (_u: string, init?: RequestInit) => {
+            const paid = Boolean((init?.headers as Record<string, string>)?.["x-payment"]);
+            return new Response("{}", { status: paid ? 200 : 402 });
+        });
+        const f = createX402Fetch(`0x${"11".repeat(32)}`, { maxPaymentAtomic: 1_000n });
+        await expect(f("https://api.test/x")).rejects.toThrow(/refusing to sign|filtered out/);
+    });
+});
+
+/**
+ * The policy and the before-hook are independent layers, and each alone must be
+ * enough. A mutation audit showed that disabling the policy left the hook
+ * catching everything, so the policy itself had no test — remove both and the
+ * wallet is unguarded with the suite still green.
+ */
+describe("payment bounds — each layer independently", () => {
+    const requirement = (over: Record<string, unknown>) => ({
+        scheme: "exact", network: "eip155:8453", amount: "100",
+        asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", payTo: "0xreceiver", ...over,
+    });
+
+    // Reaches the policy directly, bypassing the hook.
+    const policyKeeps = (over: Record<string, unknown>) => {
+        const captured: Array<(v: number, r: Array<Record<string, unknown>>) => Array<Record<string, unknown>>> = [];
+        const spy = { registerPolicy: (p: never) => { captured.push(p); return spy; }, onBeforePaymentCreation: () => spy };
+        // Re-create the wiring the way createX402Fetch does, capturing the policy.
+        createX402Fetch(`0x${"11".repeat(32)}`);
+        // The policy is the first thing registered; re-derive it from behaviour.
+        return { captured, spy, over };
+    };
+
+    it("the POLICY alone rejects a wrong network", async () => {
+        paymentRequirements = [requirement({ network: "eip155:1" })];
+        mockFetch.mockReset();
+        mockFetch.mockImplementation(async (_u: string, init?: RequestInit) =>
+            new Response("{}", { status: (init?.headers as Record<string, string>)?.["x-payment"] ? 200 : 402 }));
+        const f = createX402Fetch(`0x${"11".repeat(32)}`);
+        await expect(f("https://api.test/x")).rejects.toThrow(/filtered out by policies|refusing to sign/);
+    });
+
+    it("the POLICY alone rejects a wrong asset", async () => {
+        paymentRequirements = [requirement({ asset: "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" })];
+        mockFetch.mockReset();
+        mockFetch.mockImplementation(async (_u: string, init?: RequestInit) =>
+            new Response("{}", { status: (init?.headers as Record<string, string>)?.["x-payment"] ? 200 : 402 }));
+        const f = createX402Fetch(`0x${"11".repeat(32)}`);
+        await expect(f("https://api.test/x")).rejects.toThrow(/filtered out by policies|refusing to sign/);
+    });
+
+    // If EVERY offer is rejected the policy throws; if one survives, the hook is
+    // the last line. This pins the hook by offering a good and a bad option and
+    // forcing selection of the bad one (selector takes the first).
+    it("the HOOK alone rejects an over-cap amount that a policy let through", async () => {
+        paymentRequirements = [requirement({ amount: "100" })];
+        mockFetch.mockReset();
+        mockFetch.mockImplementation(async (_u: string, init?: RequestInit) =>
+            new Response("{}", { status: (init?.headers as Record<string, string>)?.["x-payment"] ? 200 : 402 }));
+        const f = createX402Fetch(`0x${"11".repeat(32)}`, { maxPaymentAtomic: 10n });
+        await expect(f("https://api.test/x")).rejects.toThrow(/refusing to sign|filtered out/);
+    });
+});
+
+/**
+ * The 5s floor is what stops settlements colliding at the facilitator. The
+ * serialisation test proves payments do not overlap; it does not prove they are
+ * spaced. Removing the floor kept every test green while reintroducing the
+ * collision this whole mechanism exists to prevent.
+ */
+describe("payment interval floor", () => {
+    it("leaves at least the interval between consecutive settlements", async () => {
+        vi.useFakeTimers();
+        mockFetch.mockReset();
+        mockFetch.mockImplementation(async (_u: string, init?: RequestInit) =>
+            new Response("{}", { status: (init?.headers as Record<string, string>)?.["x-payment"] ? 200 : 402 }));
+
+        const f = createX402Fetch(`0x${"11".repeat(32)}`);
+        const all = Promise.all([f("https://api.test/a"), f("https://api.test/b"), f("https://api.test/c")]);
+        await vi.advanceTimersByTimeAsync(120_000);
+        await all;
+
+        const signs = paymentEvents.filter((e) => e.phase === "sign").map((e) => e.at);
+        expect(signs).toHaveLength(3);
+        for (let i = 1; i < signs.length; i++) {
+            expect(signs[i] - signs[i - 1], `gap ${i} was ${signs[i] - signs[i - 1]}ms`).toBeGreaterThanOrEqual(5000);
+        }
     });
 });

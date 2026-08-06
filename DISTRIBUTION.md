@@ -60,7 +60,8 @@ No token, no manual step. The repo is public and the marketplace is Git-based, s
   `npx @houdiniswap/mcp-server` resolves to it — no rename needed.
 - The plugin prompts for the x402 key via a `userConfig` block in `plugin.json` and passes it to the
   server as `HOUDINI_X402_PRIVATE_KEY`. It is marked `sensitive`, so Claude Code masks the input and
-  stores it in the OS keychain rather than `settings.json`. Both `0x`-prefixed and bare 64-hex keys
+  stores it outside `settings.json` — on Linux that is `~/.claude/.credentials.json`, mode 0600 and
+  plaintext, not an OS keychain. Both `0x`-prefixed and bare 64-hex keys
   are accepted, since MetaMask exports without the prefix.
 - The MCP server starts without a key, but it cannot fetch anything: `GET /status` is the only public
   route and no tool maps to it, so every tool returns 402. "Read-only mode" means the process comes up
