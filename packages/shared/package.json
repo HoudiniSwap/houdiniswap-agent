@@ -1,6 +1,6 @@
 {
   "name": "@houdiniswap/agent-shared",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Shared HoudiniSwap API client and types for AI agent integrations",
   "type": "module",
   "license": "MIT",
@@ -24,7 +24,8 @@
     "access": "public"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "exports": {
     ".": {
