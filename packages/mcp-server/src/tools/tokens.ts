@@ -15,6 +15,11 @@ export const registerTokenTools = (server: McpServer, client: HoudiniClient) => 
             hasCex: z.boolean().optional().describe("Only tokens available on CEX providers"),
             hasDex: z.boolean().optional().describe("Only tokens available on DEX providers"),
             mainnet: z.boolean().optional().describe("Only native/mainnet tokens"),
+            // The API defaults this to false, so unverified tokens are hidden
+            // unless asked for. Without the parameter the skill's scam-token
+            // warning could never fire, because no such token was reachable.
+            unverified: z.boolean().optional().describe("Include unverified tokens (excluded by default). Warn the user before swapping any token with unverified: true."),
+            hasSelfPrivate: z.boolean().optional().describe("Only tokens supporting private (anonymous 2-hop) swaps"),
             page: z.number().int().min(1).default(1).optional().describe("Page number"),
             pageSize: z.number().int().min(1).max(100).default(20).optional().describe("Results per page"),
             verbose: z.boolean().optional().describe("Return the full unfiltered API response"),

@@ -8,6 +8,8 @@ export const tokensSchema = z.object({
     hasCex: z.boolean().optional().describe("Only tokens available on CEX providers"),
     hasDex: z.boolean().optional().describe("Only tokens available on DEX providers"),
     mainnet: z.boolean().optional().describe("Only native/mainnet tokens"),
+    unverified: z.boolean().optional().describe("Include unverified tokens (excluded by default). Warn before swapping any token with unverified: true."),
+    hasSelfPrivate: z.boolean().optional().describe("Only tokens supporting private (anonymous 2-hop) swaps"),
     page: z.number().int().min(1).default(1).optional().describe("Page number"),
     pageSize: z.number().int().min(1).max(100).default(20).optional().describe("Results per page"),
 });
