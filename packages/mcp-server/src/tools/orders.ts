@@ -12,7 +12,11 @@ export const registerOrderTools = (server: McpServer, client: HoudiniClient) => 
             verbose: z.boolean().optional().describe("Return the full unfiltered API response. Raw pages are large — combine with a small pageSize (10 or less), or the response can exceed the client's tool-result limit and be discarded entirely."),
         },
         async ({ houdiniId, verbose }) => {
-            const result = await client.get<Order>(`/orders/${houdiniId}`);
+            // Encoded, not interpolated raw: an id of "../chains" reached
+            // GET /chains and returned that endpoint's payload, which the order
+            // shaping then mangled. Order IDs reach this tool from wherever the
+            // user got them, so they are untrusted input.
+            const result = await client.get<Order>(`/orders/${encodeURIComponent(houdiniId)}`);
             return asToolResult(verbose ? result : compactOrder(result));
         },
     );

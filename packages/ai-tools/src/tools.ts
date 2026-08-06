@@ -56,7 +56,8 @@ export const createTools = (client: HoudiniClient) => ({
     getOrder: tool({
         description: "Get the current status and details of a swap order by its Houdini ID.",
         inputSchema: orderSchema,
-        execute: async ({ houdiniId }) => client.get<Order>(`/orders/${houdiniId}`),
+        // Encoded: an unescaped id of "../chains" reaches a different endpoint.
+        execute: async ({ houdiniId }) => client.get<Order>(`/orders/${encodeURIComponent(houdiniId)}`),
     }),
 
     getOrders: tool({

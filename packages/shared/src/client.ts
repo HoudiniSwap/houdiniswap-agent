@@ -32,8 +32,56 @@ export class HoudiniClient {
         }
     }
 
+    /**
+     * A 2xx whose body is not JSON used to surface as a bare `SyntaxError:
+     * Unexpected token '<'`, which says nothing about what happened. A proxy,
+     * gateway or captive portal answering with HTML is the usual cause, and the
+     * agent needs to be told that rather than shown a parser message.
+     */
+    private static async parseJson<T>(res: Response, path: string): Promise<T> {
+        const text = await res.text();
+        if (text.trim() === "") {
+            throw new HoudiniApiError(res.status, {
+                code: "EMPTY_RESPONSE",
+                message: `GET/POST ${path} returned HTTP ${res.status} with an empty body where JSON was expected.`,
+            });
+        }
+        try {
+            return JSON.parse(text) as T;
+        } catch {
+            const contentType = res.headers.get("content-type") ?? "unknown";
+            throw new HoudiniApiError(res.status, {
+                code: "INVALID_JSON",
+                message:
+                    `${path} returned HTTP ${res.status} with a non-JSON body (content-type: ${contentType}). ` +
+                    `This usually means a proxy or gateway answered instead of the API. First bytes: ${JSON.stringify(text.slice(0, 80))}`,
+            });
+        }
+    }
+
+    /**
+     * `new URL()` resolves `..` segments, so an unescaped path parameter walks
+     * out of its endpoint: `/orders/../chains` became a call to `/chains`,
+     * returning that endpoint's payload to a caller expecting an order. Note the
+     * result stays *inside* the API base, so comparing against the base is not
+     * enough — the traversal has to be rejected before normalisation.
+     *
+     * Callers encode their path parameters (`encodeURIComponent` leaves the dots
+     * but escapes the slash, so ".." can never form its own segment). This
+     * refuses the ones that forgot rather than silently calling elsewhere.
+     */
+    private assertPathStaysWithinBase(path: string): void {
+        if (path.split("/").includes("..")) {
+            throw new Error(
+                `Refusing to request "${path}": it contains a ".." segment and would escape the API base. ` +
+                    "Encode path parameters with encodeURIComponent before interpolating them.",
+            );
+        }
+    }
+
     async get<T>(path: string, params?: Record<string, unknown>): Promise<T> {
         const url = new URL(`${this.baseUrl}${path}`);
+        this.assertPathStaysWithinBase(path);
         if (params) {
             for (const [key, value] of Object.entries(params)) {
                 if (value === undefined || value === null) continue;
@@ -58,10 +106,11 @@ export class HoudiniClient {
             throw new HoudiniApiError(res.status, error, this.auth.type);
         }
 
-        return res.json() as Promise<T>;
+        return HoudiniClient.parseJson<T>(res, path);
     }
 
     async post<T>(path: string, body: unknown): Promise<T> {
+        this.assertPathStaysWithinBase(path);
         const res = await this.fetchFn(`${this.baseUrl}${path}`, {
             method: "POST",
             headers: {
@@ -77,7 +126,7 @@ export class HoudiniClient {
             throw new HoudiniApiError(res.status, error, this.auth.type);
         }
 
-        return res.json() as Promise<T>;
+        return HoudiniClient.parseJson<T>(res, path);
     }
 
     getBaseUrl(): string {

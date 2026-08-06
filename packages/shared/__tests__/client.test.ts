@@ -245,3 +245,76 @@ describe("HoudiniClient", () => {
         });
     });
 });
+
+describe("path traversal guard", () => {
+    // getOrder interpolated its id straight into the path, so an id of
+    // "../chains" resolved to GET /chains and returned that endpoint's payload
+    // to a caller expecting an order. Order IDs are untrusted input — they reach
+    // the tool from wherever the user got them.
+    it("refuses a path that escapes the API base", async () => {
+        const client = new HoudiniClient({ baseUrl: "https://api.test/v2", auth: { type: "none" } });
+        await expect(client.get("/orders/../chains")).rejects.toThrow(/escape the API base/);
+        await expect(client.get("/orders/../../etc/passwd")).rejects.toThrow(/escape the API base/);
+        await expect(client.post("/dex/../../admin", {})).rejects.toThrow(/escape the API base/);
+    });
+
+    it("allows an encoded id containing the same characters", async () => {
+        mockFetch.mockResolvedValueOnce(jsonResponse({ houdiniId: "x" }));
+        const client = new HoudiniClient({ baseUrl: "https://api.test/v2", auth: { type: "none" } });
+        await client.get(`/orders/${encodeURIComponent("../chains")}`);
+        const called = mockFetch.mock.calls[0][0] as string;
+        expect(called).toContain("/v2/orders/");
+        expect(called).not.toMatch(/\/v2\/chains/);
+    });
+
+    it("still allows ordinary nested paths", async () => {
+        mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }));
+        const client = new HoudiniClient({ baseUrl: "https://api.test/v2", auth: { type: "none" } });
+        await client.get("/orders/34ETrm1TtW41JMqMbq5hN1");
+        expect(mockFetch.mock.calls[0][0]).toContain("/v2/orders/34ETrm1TtW41JMqMbq5hN1");
+    });
+});
+
+describe("non-JSON responses", () => {
+    // A 2xx whose body is not JSON surfaced as a bare SyntaxError from the
+    // parser, which tells the agent nothing. A gateway or captive portal
+    // answering with HTML is the common cause.
+    it("explains an HTML body instead of leaking a parser error", async () => {
+        mockFetch.mockResolvedValueOnce(
+            new Response("<html><body>502 Bad Gateway</body></html>", {
+                status: 200,
+                headers: { "Content-Type": "text/html" },
+            }),
+        );
+        const client = new HoudiniClient({ auth: { type: "none" } });
+        await expect(client.get("/chains")).rejects.toThrow(/non-JSON body/);
+    });
+
+    it("names the content type and shows the first bytes", async () => {
+        mockFetch.mockResolvedValueOnce(
+            new Response("<h1>nope</h1>", { status: 200, headers: { "Content-Type": "text/html" } }),
+        );
+        const client = new HoudiniClient({ auth: { type: "none" } });
+        try {
+            await client.get("/chains");
+            expect.unreachable("should have thrown");
+        } catch (err) {
+            const message = (err as Error).message;
+            expect(message).toContain("text/html");
+            expect(message).toContain("<h1>nope</h1>");
+            expect(message).not.toMatch(/Unexpected token/);
+        }
+    });
+
+    it("reports an empty 200 body as such", async () => {
+        mockFetch.mockResolvedValueOnce(new Response("", { status: 200 }));
+        const client = new HoudiniClient({ auth: { type: "none" } });
+        await expect(client.get("/chains")).rejects.toThrow(/empty body/);
+    });
+
+    it("still parses a normal JSON body", async () => {
+        mockFetch.mockResolvedValueOnce(jsonResponse({ total: 1, chains: [{ id: "x" }] }));
+        const client = new HoudiniClient({ auth: { type: "none" } });
+        await expect(client.get("/chains")).resolves.toEqual({ total: 1, chains: [{ id: "x" }] });
+    });
+});
