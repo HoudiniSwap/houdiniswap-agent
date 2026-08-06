@@ -555,3 +555,46 @@ describe("MCP Server", () => {
         });
     });
 });
+
+/**
+ * Both of these survived a mutation audit — the behaviour could be reverted and
+ * the suite stayed green.
+ */
+describe("mutation-audit gaps", () => {
+    // Removing encodeURIComponent left the client-side guard catching it, so the
+    // outcome stayed safe and nothing failed. Relying on the other layer means
+    // either can be removed silently. This pins the tool's own encoding.
+    it("getOrder encodes the id rather than interpolating it raw", async () => {
+        mockClient.mockGet("/orders/", { houdiniId: "x" });
+        await mcpClient.callTool({ name: "getOrder", arguments: { houdiniId: "../chains" } });
+        const call = mockClient.calls.find((c) => c.method === "GET");
+        expect(call?.path).toBe(`/orders/${encodeURIComponent("../chains")}`);
+        // What matters is that ".." is not its own path segment — the encoded
+        // form "..%2Fchains" is a single segment and resolves harmlessly.
+        expect(call?.path?.split("/")).not.toContain("..");
+        expect(new URL(`https://api.test/v2${call?.path}`).pathname).toBe(
+            `/v2/orders/${encodeURIComponent("../chains")}`,
+        );
+    });
+
+    // `.default(N).optional()` builds ZodOptional<ZodDefault>; the optional
+    // wrapper short-circuits before the default fires, so the server default
+    // (1000 for getTokens) took over and one call returned 164 tokens / 42,850
+    // characters while the schema advertised 20.
+    it("getTokens applies its declared pageSize default", async () => {
+        mockClient.mockGet("/tokens", { total: 0, tokens: [] });
+        await mcpClient.callTool({ name: "getTokens", arguments: { term: "usdc" } });
+        const call = mockClient.calls.find((c) => c.path === "/tokens");
+        expect(call?.data).toMatchObject({ page: 1, pageSize: 20 });
+    });
+
+    it("getOrders and getChains apply theirs too", async () => {
+        mockClient.mockGet("/orders", { orders: [] });
+        await mcpClient.callTool({ name: "getOrders", arguments: {} });
+        expect(mockClient.calls.find((c) => c.path === "/orders")?.data).toMatchObject({ page: 1, pageSize: 20 });
+
+        mockClient.mockGet("/chains", { chains: [] });
+        await mcpClient.callTool({ name: "getChains", arguments: {} });
+        expect(mockClient.calls.find((c) => c.path === "/chains")?.data).toMatchObject({ page: 1, pageSize: 100 });
+    });
+});

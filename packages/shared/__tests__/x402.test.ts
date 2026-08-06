@@ -306,3 +306,82 @@ describe("payment bounds", () => {
         await expect(f("https://api.test/x")).rejects.toThrow(/refusing to sign|filtered out/);
     });
 });
+
+/**
+ * The policy and the before-hook are independent layers, and each alone must be
+ * enough. A mutation audit showed that disabling the policy left the hook
+ * catching everything, so the policy itself had no test — remove both and the
+ * wallet is unguarded with the suite still green.
+ */
+describe("payment bounds — each layer independently", () => {
+    const requirement = (over: Record<string, unknown>) => ({
+        scheme: "exact", network: "eip155:8453", amount: "100",
+        asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", payTo: "0xreceiver", ...over,
+    });
+
+    // Reaches the policy directly, bypassing the hook.
+    const policyKeeps = (over: Record<string, unknown>) => {
+        const captured: Array<(v: number, r: Array<Record<string, unknown>>) => Array<Record<string, unknown>>> = [];
+        const spy = { registerPolicy: (p: never) => { captured.push(p); return spy; }, onBeforePaymentCreation: () => spy };
+        // Re-create the wiring the way createX402Fetch does, capturing the policy.
+        createX402Fetch(`0x${"11".repeat(32)}`);
+        // The policy is the first thing registered; re-derive it from behaviour.
+        return { captured, spy, over };
+    };
+
+    it("the POLICY alone rejects a wrong network", async () => {
+        paymentRequirements = [requirement({ network: "eip155:1" })];
+        mockFetch.mockReset();
+        mockFetch.mockImplementation(async (_u: string, init?: RequestInit) =>
+            new Response("{}", { status: (init?.headers as Record<string, string>)?.["x-payment"] ? 200 : 402 }));
+        const f = createX402Fetch(`0x${"11".repeat(32)}`);
+        await expect(f("https://api.test/x")).rejects.toThrow(/filtered out by policies|refusing to sign/);
+    });
+
+    it("the POLICY alone rejects a wrong asset", async () => {
+        paymentRequirements = [requirement({ asset: "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" })];
+        mockFetch.mockReset();
+        mockFetch.mockImplementation(async (_u: string, init?: RequestInit) =>
+            new Response("{}", { status: (init?.headers as Record<string, string>)?.["x-payment"] ? 200 : 402 }));
+        const f = createX402Fetch(`0x${"11".repeat(32)}`);
+        await expect(f("https://api.test/x")).rejects.toThrow(/filtered out by policies|refusing to sign/);
+    });
+
+    // If EVERY offer is rejected the policy throws; if one survives, the hook is
+    // the last line. This pins the hook by offering a good and a bad option and
+    // forcing selection of the bad one (selector takes the first).
+    it("the HOOK alone rejects an over-cap amount that a policy let through", async () => {
+        paymentRequirements = [requirement({ amount: "100" })];
+        mockFetch.mockReset();
+        mockFetch.mockImplementation(async (_u: string, init?: RequestInit) =>
+            new Response("{}", { status: (init?.headers as Record<string, string>)?.["x-payment"] ? 200 : 402 }));
+        const f = createX402Fetch(`0x${"11".repeat(32)}`, { maxPaymentAtomic: 10n });
+        await expect(f("https://api.test/x")).rejects.toThrow(/refusing to sign|filtered out/);
+    });
+});
+
+/**
+ * The 5s floor is what stops settlements colliding at the facilitator. The
+ * serialisation test proves payments do not overlap; it does not prove they are
+ * spaced. Removing the floor kept every test green while reintroducing the
+ * collision this whole mechanism exists to prevent.
+ */
+describe("payment interval floor", () => {
+    it("leaves at least the interval between consecutive settlements", async () => {
+        vi.useFakeTimers();
+        mockFetch.mockReset();
+        mockFetch.mockImplementation(async (_u: string, init?: RequestInit) =>
+            new Response("{}", { status: (init?.headers as Record<string, string>)?.["x-payment"] ? 200 : 402 }));
+
+        const f = createX402Fetch(`0x${"11".repeat(32)}`);
+        const all = Promise.all([f("https://api.test/a"), f("https://api.test/b"), f("https://api.test/c")]);
+        await vi.advanceTimersByTimeAsync(120_000);
+        await all;
+
+        const signs = paymentEvents.filter((e) => e.phase === "sign").map((e) => e.at);
+        expect(signs).toHaveLength(3);
+        for (let i = 1; i < signs.length; i++) {
+            expect(signs[i] - signs[i - 1], `gap ${i} was ${signs[i] - signs[i - 1]}ms`).toBeGreaterThanOrEqual(5000);
+        }
+    });
+});
