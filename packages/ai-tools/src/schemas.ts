@@ -10,8 +10,8 @@ export const tokensSchema = z.object({
     mainnet: z.boolean().optional().describe("Only native/mainnet tokens"),
     unverified: z.boolean().optional().describe("Include unverified tokens (excluded by default). Warn before swapping any token with unverified: true."),
     hasSelfPrivate: z.boolean().optional().describe("Only tokens supporting private (anonymous 2-hop) swaps"),
-    page: z.number().int().min(1).default(1).optional().describe("Page number"),
-    pageSize: z.number().int().min(1).max(100).default(20).optional().describe("Results per page"),
+    page: z.number().int().min(1).optional().default(1).describe("Page number"),
+    pageSize: z.number().int().min(1).max(100).optional().default(20).describe("Results per page"),
 });
 
 export const chainsSchema = z.object({
@@ -21,8 +21,8 @@ export const chainsSchema = z.object({
     name: z.string().optional().describe("Search by chain name"),
     chainId: z.number().int().optional().describe("Filter by EVM chain ID (e.g. 8453 for Base)"),
     memoNeeded: z.boolean().optional().describe("Only chains that require a memo/destination tag"),
-    page: z.number().int().min(1).default(1).optional(),
-    pageSize: z.number().int().min(1).max(100).default(100).optional(),
+    page: z.number().int().min(1).optional().default(1),
+    pageSize: z.number().int().min(1).max(100).optional().default(100),
 });
 
 export const quoteSchema = z.object({
@@ -39,6 +39,15 @@ export const quoteSchema = z.object({
     rotatePayoutWallets: z.boolean().optional().describe("Rotate payout wallets for better privacy. CEX quotes only."),
     deviationThreshold: z.number().min(0).max(100).optional().describe("Max price deviation % when rotating wallets (default 5)."),
     rotationLookback: z.number().int().min(1).max(100).optional().describe("Recent orders to check for path rotation (default 10)."),
+    rotateFallback: z.boolean().optional().describe("If strict rotation exhausts every rotated route, fall back to a non-rotated one. Requires rotatePayoutWallets."),
+    amountType: z.enum(["send", "receive"]).optional().describe("'send' (default): amount is what the user sends. 'receive': amount is what they want to receive — requires fixed=true, standard CEX quotes only."),
+    fixed: z.boolean().optional().describe("Request fixed-rate quotes; only providers supporting fixed rate are returned."),
+    useXmr: z.boolean().optional().describe("For private swaps, use Monero as the intermediate hop instead of another L1."),
+    refundAddress: z.string().optional().describe("Sender address for refunds if a fixed-rate swap fails."),
+    inLegIncludedSwaps: z.array(z.string()).optional().describe("Private swaps only: allowlist of providers for the first hop."),
+    inLegExcludedSwaps: z.array(z.string()).optional().describe("Private swaps only: blocklist of providers for the first hop."),
+    outLegIncludedSwaps: z.array(z.string()).optional().describe("Private swaps only: allowlist of providers for the second hop."),
+    outLegExcludedSwaps: z.array(z.string()).optional().describe("Private swaps only: blocklist of providers for the second hop."),
 });
 
 export const exchangeSchema = z.object({
@@ -67,8 +76,8 @@ export const orderSchema = z.object({
 // `from`/`to`, not `dateFrom`/`dateTo`: the API ignores the latter, so the date
 // filter silently did nothing and a request for January 2020 returned today.
 export const ordersSchema = z.object({
-    page: z.number().int().min(1).default(1).optional(),
-    pageSize: z.number().int().min(1).max(100).default(20).optional(),
+    page: z.number().int().min(1).optional().default(1),
+    pageSize: z.number().int().min(1).max(100).optional().default(20),
     status: z.number().optional().describe("Filter by order status code (4 = FINISHED, 5 = EXPIRED)"),
     from: z.string().optional().describe("Start date, ISO 8601"),
     to: z.string().optional().describe("End date, ISO 8601"),

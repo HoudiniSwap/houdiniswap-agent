@@ -51,11 +51,39 @@ describe("ai-tools schema parity with the API contract", () => {
         }
     });
 
-    it("getQuote exposes the provider filter and privacy options", () => {
+    // Asserting only the four that already existed is what let ai-tools fall
+    // nine parameters behind mcp-server unnoticed. This lists every getQuote
+    // parameter the API accepts, so any future addition on one side fails here.
+    it("getQuote exposes every parameter the API accepts", () => {
         const params = paramsOf(schemas.quoteSchema as never);
-        for (const p of ["swaps", "rotatePayoutWallets", "deviationThreshold", "rotationLookback"]) {
-            expect(params).toContain(p);
-        }
+        const apiParams = [
+            "from", "to", "amount", "types", "slippage", "senderAddress", "receiverAddress",
+            "sort", "sortOrder", "swaps", "rotatePayoutWallets", "deviationThreshold",
+            "rotationLookback", "rotateFallback", "amountType", "fixed", "useXmr",
+            "refundAddress", "inLegIncludedSwaps", "inLegExcludedSwaps",
+            "outLegIncludedSwaps", "outLegExcludedSwaps",
+        ];
+        const missing = apiParams.filter((p) => !params.includes(p));
+        expect(missing, `getQuote is missing: ${missing.join(", ")}`).toEqual([]);
+    });
+
+    it("getTokens exposes unverified and hasSelfPrivate", () => {
+        const params = paramsOf(schemas.tokensSchema as never);
+        expect(params).toContain("unverified");
+        expect(params).toContain("hasSelfPrivate");
+    });
+
+    // `.default(N).optional()` builds ZodOptional<ZodDefault>, and the optional
+    // wrapper short-circuits on undefined before the default fires — so the
+    // declared default silently never applied and the server default (1000 for
+    // getTokens) took over instead.
+    it("applies declared defaults rather than dropping them", () => {
+        expect((schemas.tokensSchema as never as { parse: (v: unknown) => Record<string, unknown> }).parse({}))
+            .toMatchObject({ page: 1, pageSize: 20 });
+        expect((schemas.ordersSchema as never as { parse: (v: unknown) => Record<string, unknown> }).parse({}))
+            .toMatchObject({ page: 1, pageSize: 20 });
+        expect((schemas.chainsSchema as never as { parse: (v: unknown) => Record<string, unknown> }).parse({}))
+            .toMatchObject({ page: 1, pageSize: 100 });
     });
 
     it("getChains exposes chainId and memoNeeded", () => {

@@ -152,7 +152,7 @@ Partner, `sxff` FixedFloat (CEX); `un` Uniswap, `jp` Jupiter, `rd` Raydium, `ps`
 |------|-------------|
 | `createExchange` | Create order from `quoteId`. Params: `addressTo` (required), `addressFrom` (required for DEX), `signatures` (DEX permit), `destinationTag` (XRP/XLM memo). Returns order with deposit address. |
 | `getOrder` | Get order by `houdiniId`. Shows status, deposit address, tx hashes. |
-| `getOrders` | List orders. Filter by `status`, `dateFrom`, `dateTo`. |
+| `getOrders` | List orders. Filter by `status`, `from`/`to` (ISO dates — **not** `dateFrom`/`dateTo`, which the API ignores), `anonymous`, `inTokenId`, `outTokenId`, `multiId`; sort with `sortBy`/`sortOrder`. |
 
 ### DEX-Specific
 | Tool | Description |
@@ -338,10 +338,22 @@ This agent pays per API request with USDC on Base:
 | Operation | Cost |
 |-----------|------|
 | Token/chain/swap lookup | $0.0001 |
+| `dexApprove`, `dexCheckAllowance`, `dexChainSignatures` | $0.0001 |
 | Quote | $0.001 |
-| Create exchange | $0.01 |
-| Status check | $0.0001 |
+| `createExchange` | $0.01 |
+| **`dexConfirmTx`** | **$0.01** — exchange-tier, not a status check |
+| Status check (`getOrder`, `getOrders`) | $0.0001 |
 | Full standard swap | ~$0.012 |
-| Full DEX swap | ~$0.015 |
+| Full DEX swap | **~$0.022** |
+
+The DEX flow costs more than twice a standard swap because it pays the $0.01
+exchange tier **twice** — once for `createExchange` and again for `dexConfirmTx`:
+2× `getTokens` ($0.0002) + `getQuote` ($0.001) + `dexCheckAllowance` ($0.0001) +
+`dexApprove` ($0.0001) + `createExchange` ($0.01) + `dexConfirmTx` ($0.01) +
+`getOrder` ($0.0001) = **$0.0215**.
 
 Rate limit: 60 requests/minute per payer address.
+
+Paid calls are serialised with a ~5s gap: the facilitator settles each payment
+on-chain and two settlements at once from the same wallet fail. A full swap flow
+therefore takes 20-30 seconds. That is expected, not a hang.

@@ -16,10 +16,10 @@ For the step-by-step release runbook, see [`PUBLISHING.md`](./PUBLISHING.md).
 - `packages/shared/package.json` → added `publishConfig.access: public`. `agent-shared` **must**
   be published: `mcp-server/dist/index.js` imports `HoudiniClient` from it at runtime and does not
   bundle it, so a published `mcp-server` would 404 / `ERR_MODULE_NOT_FOUND` without it on the registry.
-- `mcp-server` + `ai-tools` → dependency pinned `"@houdiniswap/agent-shared": "*"` → `"^0.1.0"`
+- `mcp-server` + `ai-tools` → dependency pinned `"@houdiniswap/agent-shared": "*"` → a caret range
   (npm does **not** rewrite plain `"*"` on publish — only the `workspace:` protocol gets rewritten —
   so `*` would 404 at consumer install). Both also got `publishConfig.access: public`.
-- Verified: `npm install` relinks the workspace, `npm run build` green, **all 46 tests pass**,
+- Verified: `npm install` relinks the workspace, `npm run build` green, **the full suite passes**,
   `npm pack --dry-run` shows clean `dist`-only tarballs.
 
 ### Claude marketplace path — one plugin = skill + MCP server
@@ -46,12 +46,13 @@ claude mcp add houdiniswap --env HOUDINI_X402_PRIVATE_KEY=0x... -- npx -y @houdi
 /plugin install houdiniswap@houdiniswap        # plugin@marketplace
 ```
 
-## Remaining manual steps (require credentials)
+## Releasing
 
-1. `npm login` (access to the `@houdiniswap` org).
-2. Publish **in order**: `cd packages/shared && npm publish` → `mcp-server` → `ai-tools`.
-3. Make the GitHub repo public.
-4. Push — the marketplace goes live immediately (Git-based; the plugin itself is not published to npm).
+All of this is automated — see [`PUBLISHING.md`](./PUBLISHING.md). Bump the version in
+the package's `package.json` and merge to `main`; `.github/workflows/publish.yml` publishes
+the packages whose version changed, in dependency order, via npm trusted publishing (OIDC).
+No token, no manual step. The repo is public and the marketplace is Git-based, so pushing to
+`main` also updates the plugin.
 
 ## Notes
 

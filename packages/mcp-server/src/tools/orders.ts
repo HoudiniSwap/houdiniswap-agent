@@ -25,8 +25,8 @@ export const registerOrderTools = (server: McpServer, client: HoudiniClient) => 
         // takes `from`/`to` — so it was silently ignored and a request for
         // January 2020 returned today's orders.
         {
-            page: z.number().int().min(1).default(1).optional(),
-            pageSize: z.number().int().min(1).max(100).default(20).optional(),
+            page: z.number().int().min(1).optional().default(1),
+            pageSize: z.number().int().min(1).max(100).optional().default(20),
             status: z.number().optional().describe("Filter by order status code (4 = FINISHED, 5 = EXPIRED)"),
             from: z.string().optional().describe("Start date, ISO 8601 (e.g. '2026-08-01T00:00:00.000Z')"),
             to: z.string().optional().describe("End date, ISO 8601"),

@@ -6,12 +6,13 @@ MCP Server + AI SDK Tools for [HoudiniSwap](https://houdiniswap.com) — agent-f
 
 HoudiniSwap aggregates 14 CEXes and 20+ DEXes across multiple blockchains. This repo provides agent integration tools so AI assistants can discover, quote, and execute swaps programmatically.
 
-**Two packages:**
+**Three published packages:**
 
 | Package | Description | Install |
 |---------|-------------|---------|
 | `@houdiniswap/mcp-server` | MCP server for Claude, Cursor, ChatGPT | `npx -y @houdiniswap/mcp-server` |
 | `@houdiniswap/ai-tools` | Vercel AI SDK v6 tool definitions | `npm install @houdiniswap/ai-tools` |
+| `@houdiniswap/agent-shared` | Shared HTTP + x402 client. A runtime dependency of the other two — installed automatically, not used directly. | — |
 
 ## Quick Start — MCP Server
 
@@ -128,8 +129,10 @@ The x402 protocol enables pay-per-request API access with USDC on Base. No accou
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `HOUDINI_X402_PRIVATE_KEY` | One of these | — | EVM wallet private key for x402 payments |
-| `HOUDINI_API_KEY` | required | — | Partner API key (`id:secret`) |
-| `HOUDINI_PARTNER_ID` | | — | Public partner ID (read-only access) |
+| `HOUDINI_API_KEY` | One of these | — | Partner API key (`id:secret`) |
+| `HOUDINI_PARTNER_ID` | One of these | — | Public partner ID (read-only access) |
+
+None is strictly required — the server starts without any of them, but every tool then returns 402. Precedence is `HOUDINI_API_KEY` → `HOUDINI_X402_PRIVATE_KEY` → `HOUDINI_PARTNER_ID`.
 | `HOUDINI_API_URL` | No | `https://api-partner.houdiniswap.com/v2` | API base URL |
 | `PORT` | No | `8080` | HTTP transport port |
 

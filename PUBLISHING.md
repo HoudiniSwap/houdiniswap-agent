@@ -35,7 +35,7 @@ package, or if CI is unavailable.
 
 ## Pre-Publish Checklist
 
-- [ ] All 46 tests passing (`npm run test`)
+- [ ] All tests passing (`npm run test`)
 - [ ] E2E verified on production (`api-partner.houdiniswap.com`)
 - [ ] x402 facilitator running on production
 - [ ] Default partner migration run on production DB
@@ -66,7 +66,7 @@ npm run test
 `@houdiniswap/agent-shared` **must** be published. `mcp-server` and `ai-tools` import it at
 runtime (`import { HoudiniClient } from "@houdiniswap/agent-shared"`), so `npx @houdiniswap/mcp-server`
 fails with a 404 / `ERR_MODULE_NOT_FOUND` if it isn't on the registry. It carries
-`publishConfig.access: public`, and the dependents pin it to `^0.1.0` (not `*`).
+`publishConfig.access: public`, and the dependents pin it to a caret range on the current minor (not `*`).
 
 ```bash
 cd packages/shared
@@ -158,7 +158,7 @@ After publishing, update the docs at `houdiniswap-backend/docs/v2/`:
 
 ## Version Bumping
 
-Bump all three in lockstep. Dependents pin `agent-shared` at `^0.1.0`, so a **major** bump of
+Dependents pin `agent-shared` at a caret range on its current version, so while it is pre-1.0 a **minor** bump of
 shared also requires updating that range in `mcp-server`/`ai-tools`.
 
 ```bash
