@@ -22,7 +22,7 @@ export const registerTokenTools = (server: McpServer, client: HoudiniClient) => 
             hasSelfPrivate: z.boolean().optional().describe("Only tokens supporting private (anonymous 2-hop) swaps"),
             page: z.number().int().min(1).optional().default(1).describe("Page number"),
             pageSize: z.number().int().min(1).max(100).optional().default(20).describe("Results per page"),
-            verbose: z.boolean().optional().describe("Return the full unfiltered API response"),
+            verbose: z.boolean().optional().describe("Return the full unfiltered API response. Raw pages are large — combine with a small pageSize (10 or less), or the response can exceed the client's tool-result limit and be discarded entirely."),
         },
         async ({ verbose, ...params }) => {
             const result = await client.get<TokenResult>("/tokens", params);

@@ -9,7 +9,7 @@ export const registerOrderTools = (server: McpServer, client: HoudiniClient) => 
         "Get the current status and details of a swap order by its Houdini ID.",
         {
             houdiniId: z.string().describe("The Houdini order ID (e.g. 'HOUDINI...')"),
-            verbose: z.boolean().optional().describe("Return the full unfiltered API response"),
+            verbose: z.boolean().optional().describe("Return the full unfiltered API response. Raw pages are large — combine with a small pageSize (10 or less), or the response can exceed the client's tool-result limit and be discarded entirely."),
         },
         async ({ houdiniId, verbose }) => {
             const result = await client.get<Order>(`/orders/${houdiniId}`);
@@ -36,7 +36,7 @@ export const registerOrderTools = (server: McpServer, client: HoudiniClient) => 
             outTokenId: z.string().optional().describe("Filter by destination token ID"),
             sortBy: z.enum(["created", "updated", "amount"]).optional().describe("Sort field (default: created)"),
             sortOrder: z.enum(["asc", "desc"]).optional().describe("Sort direction (default: desc)"),
-            verbose: z.boolean().optional().describe("Return the full unfiltered API response"),
+            verbose: z.boolean().optional().describe("Return the full unfiltered API response. Raw pages are large — combine with a small pageSize (10 or less), or the response can exceed the client's tool-result limit and be discarded entirely."),
         },
         async ({ verbose, ...params }) => {
             const result = await client.get<{ orders: Order[]; totalPages: number }>("/orders", params);
