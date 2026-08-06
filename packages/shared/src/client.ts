@@ -4,14 +4,19 @@ import { createX402Fetch } from "./x402.js";
 
 const DEFAULT_BASE_URL = "https://api-partner.houdiniswap.com/v2";
 
+/** Ceiling on any single request. The paid retry has its own 60s bound. */
+const DEFAULT_TIMEOUT_MS = 30_000;
+
 export class HoudiniClient {
     private baseUrl: string;
     private auth: HoudiniAuth;
     private fetchFn: typeof fetch;
+    private timeoutMs: number;
 
     constructor(config: HoudiniConfig) {
         this.baseUrl = config.baseUrl?.replace(/\/$/, "") || DEFAULT_BASE_URL;
         this.auth = config.auth;
+        this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
         if (this.auth.type === "x402") {
             this.fetchFn = createX402Fetch(this.auth.privateKey);
@@ -60,21 +65,84 @@ export class HoudiniClient {
     }
 
     /**
+     * An upstream that accepts the connection and then goes silent left calls
+     * pending indefinitely — the x402 layer reasoned carefully about stalls
+     * wedging the payment queue, while the far more common stall, an ordinary
+     * request, was unbounded. The paid retry has its own 60s bound; this covers
+     * everything else.
+     */
+    private async withTimeout(run: (signal: AbortSignal) => Promise<Response>): Promise<Response> {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+        try {
+            return await run(controller.signal);
+        } catch (err) {
+            if (controller.signal.aborted) {
+                throw new Error(`Request timed out after ${this.timeoutMs}ms`);
+            }
+            throw err;
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    /**
+     * Error bodies get the same treatment as success bodies. Routing only the
+     * success path through the JSON guard fixed the rarer case and missed the
+     * likelier one: a proxy answering a 502 with HTML collapsed to
+     * "HTTP 502: Unknown error" with an empty error object.
+     */
+    private static async errorBody(res: Response, path: string): Promise<ApiError> {
+        try {
+            return await HoudiniClient.parseJson<ApiError>(res, path);
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { code: "NON_JSON_ERROR", message };
+        }
+    }
+
+    /**
      * `new URL()` resolves `..` segments, so an unescaped path parameter walks
      * out of its endpoint: `/orders/../chains` became a call to `/chains`,
-     * returning that endpoint's payload to a caller expecting an order. Note the
-     * result stays *inside* the API base, so comparing against the base is not
-     * enough — the traversal has to be rejected before normalisation.
+     * returning that endpoint's payload to a caller expecting an order.
      *
-     * Callers encode their path parameters (`encodeURIComponent` leaves the dots
-     * but escapes the slash, so ".." can never form its own segment). This
-     * refuses the ones that forgot rather than silently calling elsewhere.
+     * The check compares the *normalised* result against the endpoint the caller
+     * asked for. An earlier version inspected the raw string for a literal ".."
+     * instead, which meant enumerating encodings — and it missed `%2e%2e` and
+     * `..\` (WHATWG treats a backslash as a separator for http/https, so
+     * splitting on "/" sees one atom). Testing the outcome catches every
+     * spelling at once.
+     *
+     * Callers still encode their path parameters; this catches the ones that
+     * forget rather than silently calling somewhere else.
      */
     private assertPathStaysWithinBase(path: string): void {
-        if (path.split("/").includes("..")) {
+        const base = new URL(this.baseUrl);
+        const basePath = base.pathname.replace(/\/$/, "");
+
+        // The endpoint the caller intended: the first path segment, with any
+        // query string or fragment removed first — callers pass paths like
+        // "/quotes?amount=-1" and those must not be treated as a segment.
+        const pathOnly = path.split(/[?#]/)[0];
+        const intended = `${basePath}/${pathOnly.replace(/^\//, "").split("/")[0]}`;
+
+        let resolved: URL;
+        try {
+            resolved = new URL(`${this.baseUrl}${path}`);
+        } catch {
+            throw new Error(`Refusing to request "${path}": it is not a valid URL path.`);
+        }
+
+        if (resolved.origin !== base.origin) {
             throw new Error(
-                `Refusing to request "${path}": it contains a ".." segment and would escape the API base. ` +
-                    "Encode path parameters with encodeURIComponent before interpolating them.",
+                `Refusing to request "${path}": it resolves to ${resolved.origin}, not ${base.origin}.`,
+            );
+        }
+        if (resolved.pathname !== intended && !resolved.pathname.startsWith(`${intended}/`)) {
+            throw new Error(
+                `Refusing to request "${path}": it resolves to ${resolved.pathname}, outside the intended ` +
+                    `endpoint ${intended}. Encode path parameters with encodeURIComponent — an unescaped ` +
+                    "'..', '%2e%2e' or backslash lets a parameter reach a different endpoint.",
             );
         }
     }
@@ -93,17 +161,19 @@ export class HoudiniClient {
             }
         }
 
-        const res = await this.fetchFn(url.toString(), {
-            method: "GET",
-            headers: {
-                Accept: "application/json",
-                ...this.getAuthHeaders(),
-            },
-        });
+        const res = await this.withTimeout((signal) =>
+            this.fetchFn(url.toString(), {
+                method: "GET",
+                headers: {
+                    Accept: "application/json",
+                    ...this.getAuthHeaders(),
+                },
+                signal,
+            }),
+        );
 
         if (!res.ok) {
-            const error = await res.json().catch(() => ({})) as ApiError;
-            throw new HoudiniApiError(res.status, error, this.auth.type);
+            throw new HoudiniApiError(res.status, await HoudiniClient.errorBody(res, path), this.auth.type);
         }
 
         return HoudiniClient.parseJson<T>(res, path);
@@ -111,19 +181,21 @@ export class HoudiniClient {
 
     async post<T>(path: string, body: unknown): Promise<T> {
         this.assertPathStaysWithinBase(path);
-        const res = await this.fetchFn(`${this.baseUrl}${path}`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Accept: "application/json",
-                ...this.getAuthHeaders(),
-            },
-            body: JSON.stringify(body),
-        });
+        const res = await this.withTimeout((signal) =>
+            this.fetchFn(`${this.baseUrl}${path}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Accept: "application/json",
+                    ...this.getAuthHeaders(),
+                },
+                body: JSON.stringify(body),
+                signal,
+            }),
+        );
 
         if (!res.ok) {
-            const error = await res.json().catch(() => ({})) as ApiError;
-            throw new HoudiniApiError(res.status, error, this.auth.type);
+            throw new HoudiniApiError(res.status, await HoudiniClient.errorBody(res, path), this.auth.type);
         }
 
         return HoudiniClient.parseJson<T>(res, path);

@@ -246,34 +246,6 @@ describe("HoudiniClient", () => {
     });
 });
 
-describe("path traversal guard", () => {
-    // getOrder interpolated its id straight into the path, so an id of
-    // "../chains" resolved to GET /chains and returned that endpoint's payload
-    // to a caller expecting an order. Order IDs are untrusted input — they reach
-    // the tool from wherever the user got them.
-    it("refuses a path that escapes the API base", async () => {
-        const client = new HoudiniClient({ baseUrl: "https://api.test/v2", auth: { type: "none" } });
-        await expect(client.get("/orders/../chains")).rejects.toThrow(/escape the API base/);
-        await expect(client.get("/orders/../../etc/passwd")).rejects.toThrow(/escape the API base/);
-        await expect(client.post("/dex/../../admin", {})).rejects.toThrow(/escape the API base/);
-    });
-
-    it("allows an encoded id containing the same characters", async () => {
-        mockFetch.mockResolvedValueOnce(jsonResponse({ houdiniId: "x" }));
-        const client = new HoudiniClient({ baseUrl: "https://api.test/v2", auth: { type: "none" } });
-        await client.get(`/orders/${encodeURIComponent("../chains")}`);
-        const called = mockFetch.mock.calls[0][0] as string;
-        expect(called).toContain("/v2/orders/");
-        expect(called).not.toMatch(/\/v2\/chains/);
-    });
-
-    it("still allows ordinary nested paths", async () => {
-        mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }));
-        const client = new HoudiniClient({ baseUrl: "https://api.test/v2", auth: { type: "none" } });
-        await client.get("/orders/34ETrm1TtW41JMqMbq5hN1");
-        expect(mockFetch.mock.calls[0][0]).toContain("/v2/orders/34ETrm1TtW41JMqMbq5hN1");
-    });
-});
 
 describe("non-JSON responses", () => {
     // A 2xx whose body is not JSON surfaced as a bare SyntaxError from the
@@ -316,5 +288,46 @@ describe("non-JSON responses", () => {
         mockFetch.mockResolvedValueOnce(jsonResponse({ total: 1, chains: [{ id: "x" }] }));
         const client = new HoudiniClient({ auth: { type: "none" } });
         await expect(client.get("/chains")).resolves.toEqual({ total: 1, chains: [{ id: "x" }] });
+    });
+});
+
+describe("path traversal — encoded and backslash variants", () => {
+    // The first guard inspected the raw string for a literal "..", which meant
+    // enumerating encodings. Both of these slipped through it and still escaped:
+    // WHATWG normalises %2e%2e as a dot-segment, and treats \ as a separator for
+    // http/https so splitting on "/" saw a single atom.
+    const client = () => new HoudiniClient({ baseUrl: "https://api.test/v2", auth: { type: "none" } });
+
+    it.each([
+        ["literal dots", "/orders/../chains"],
+        ["percent-encoded", "/orders/%2e%2e/chains"],
+        ["uppercase percent-encoded", "/orders/%2E%2E/chains"],
+        ["mixed", "/orders/.%2e/chains"],
+        ["backslash", "/orders/..\\chains"],
+        ["double backslash", "/orders/..\\..\\chains"],
+        ["deep escape", "/orders/../../../etc/passwd"],
+    ])("refuses %s", async (_label, path) => {
+        await expect(client().get(path)).rejects.toThrow(/outside the intended endpoint|not a valid URL path/);
+    });
+
+    it("refuses the same variants on post", async () => {
+        await expect(client().post("/dex/%2e%2e/../admin", {})).rejects.toThrow(/outside the intended endpoint/);
+    });
+
+    it("allows a properly encoded id containing those characters", async () => {
+        mockFetch.mockResolvedValueOnce(jsonResponse({ houdiniId: "x" }));
+        await client().get(`/orders/${encodeURIComponent("../chains")}`);
+        const called = mockFetch.mock.calls[0][0] as string;
+        expect(called).toContain("/v2/orders/");
+        expect(called).not.toMatch(/\/v2\/chains/);
+    });
+
+    it("still allows ordinary paths and query params", async () => {
+        mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }));
+        await client().get("/orders/34ETrm1TtW41JMqMbq5hN1");
+        expect(mockFetch.mock.calls[0][0]).toContain("/v2/orders/34ETrm1TtW41JMqMbq5hN1");
+        mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }));
+        await client().get("/tokens", { symbol: "BTC" });
+        expect(mockFetch.mock.calls[1][0]).toContain("/v2/tokens?symbol=BTC");
     });
 });

@@ -30,6 +30,23 @@ const main = async () => {
         // HTTP 500 for every request after it, with nothing logged. Stateless
         // mode wants a fresh server and transport per request, torn down when
         // the response closes.
+        // GET opens a standalone notification stream the SDK never closes, and
+        // the per-request server stays pinned for as long as the client holds
+        // the socket. 181 idle GETs were enough to OOM the process — no
+        // credentials required. Nothing here needs that stream, so it is refused.
+        app.get("/mcp", (_req, res) => {
+            res.status(405)
+                .set("Allow", "POST")
+                .json({
+                    jsonrpc: "2.0",
+                    error: {
+                        code: -32601,
+                        message: "This server is request/response only; use POST. GET would open a notification stream it does not use.",
+                    },
+                    id: null,
+                });
+        });
+
         app.all("/mcp", async (req, res) => {
             const requestServer = createMcpServer(client);
             const requestTransport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
@@ -59,9 +76,35 @@ const main = async () => {
             }
         });
 
-        app.listen(port, () => {
-            console.error(`HoudiniSwap MCP server (HTTP) listening on port ${port}`);
+        // Loopback by default. This server spends a funded wallet — every tool
+        // call costs USDC and createExchange costs $0.01 — and it has no
+        // authentication, so binding every interface put the operator's wallet
+        // behind an open port. Set HOUDINI_HTTP_HOST to override deliberately,
+        // and put authentication in front of it if you do.
+        const host = process.env.HOUDINI_HTTP_HOST || "127.0.0.1";
+
+        const httpServer = app.listen(port, host, () => {
+            console.error(`HoudiniSwap MCP server (HTTP) listening on ${host}:${port}`);
+            if (host !== "127.0.0.1" && host !== "localhost") {
+                console.error(
+                    `WARNING: bound to ${host}, which is reachable beyond this machine. There is no ` +
+                        "authentication on /mcp, and every tool call spends the configured wallet. " +
+                        "Put an authenticating proxy in front of it.",
+                );
+            }
         });
+
+        // Otherwise EADDRINUSE crashes with a raw stack that never reaches the
+        // handler below.
+        httpServer.on("error", (err: NodeJS.ErrnoException) => {
+            console.error(
+                err.code === "EADDRINUSE"
+                    ? `Port ${port} is already in use. Set PORT to a free port.`
+                    : `HTTP server error: ${err.message}`,
+            );
+            process.exit(1);
+        });
+
     } else {
         const stdioTransport = new StdioServerTransport();
         await server.connect(stdioTransport);

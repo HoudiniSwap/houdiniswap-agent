@@ -1,6 +1,8 @@
 export interface HoudiniConfig {
     baseUrl?: string;
     auth: HoudiniAuth;
+    /** Ceiling on any single request, in ms. Defaults to 30000. */
+    timeoutMs?: number;
 }
 
 export type HoudiniAuth =
