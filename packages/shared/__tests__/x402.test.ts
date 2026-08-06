@@ -156,3 +156,48 @@ describe("createX402Fetch", () => {
         expect((await second).status).toBe(200);
     });
 });
+
+/**
+ * Money-path invariant with no previous test: exactly one signed authorisation
+ * per 402. Two payments for one logical call would require two calls to
+ * createPaymentPayload, so pinning the count pins the property.
+ *
+ * This is what makes a timeout safe to add. A timeout cannot double-spend — it
+ * can only lose a single payment if the facilitator settles after we stop
+ * waiting, and EIP-3009 nonce replay protection means one authorisation settles
+ * at most once regardless.
+ */
+describe("payment count invariant", () => {
+    it("signs exactly one authorisation per 402, even when the retry fails", async () => {
+        vi.useFakeTimers();
+        mockFetch.mockImplementation(async (_url: string, init?: RequestInit) => {
+            const paid = Boolean((init?.headers as Record<string, string>)?.["x-payment"]);
+            if (!paid) return new Response("{}", { status: 402 });
+            return new Response("{}", { status: 402 }); // facilitator refuses
+        });
+
+        const f = createX402Fetch(`0x${"11".repeat(32)}`);
+        const res = await f("https://api.test/refused");
+        await vi.advanceTimersByTimeAsync(120_000);
+
+        expect(res.status).toBe(402);
+        expect(paymentEvents.filter((e) => e.phase === "sign")).toHaveLength(1);
+    });
+
+    it("signs exactly one authorisation per 402 on the success path", async () => {
+        vi.useFakeTimers();
+        const f = createX402Fetch(`0x${"11".repeat(32)}`);
+        const p = f("https://api.test/ok");
+        await vi.advanceTimersByTimeAsync(120_000);
+        await p;
+        expect(paymentEvents.filter((e) => e.phase === "sign")).toHaveLength(1);
+    });
+
+    it("does not sign at all when the endpoint is free", async () => {
+        mockFetch.mockReset();
+        mockFetch.mockResolvedValue(new Response("{}", { status: 200 }));
+        const f = createX402Fetch(`0x${"11".repeat(32)}`);
+        await f("https://api.test/status");
+        expect(paymentEvents).toHaveLength(0);
+    });
+});
