@@ -1,11 +1,103 @@
 import { x402Client, x402HTTPClient } from "@x402/core/client";
 import { registerExactEvmScheme } from "@x402/evm/exact/client";
 import { privateKeyToAccount } from "viem/accounts";
+import { USDC_BASE } from "./constants.js";
 
-export const createX402Fetch = (privateKey: `0x${string}`): typeof fetch => {
+/** Base mainnet, the only network this API settles on. */
+const BASE_NETWORK = "eip155:8453";
+
+/**
+ * Ceiling on a single payment, in USDC atomic units (6 decimals).
+ * 100_000 = $0.10, which is 10x the most expensive documented call ($0.01) and
+ * far below anything that would matter if a wallet were drained one call at a
+ * time.
+ */
+const DEFAULT_MAX_PAYMENT_ATOMIC = 100_000n;
+
+export interface X402Options {
+    /** Ceiling per payment in USDC atomic units. Defaults to 100_000 ($0.10). */
+    maxPaymentAtomic?: bigint;
+}
+
+/**
+ * Everything about a payment — amount, recipient, asset, chain — arrives in the
+ * server's 402 challenge. Without a policy the signer accepts all of it: pointed
+ * at a hostile server, a $0.0001 tool call signs whatever authorisation it is
+ * handed. That was demonstrated against a mock returning a 402 demanding
+ * 1,000,000 USDC to an arbitrary address, valid for a year — the wallet signed it.
+ *
+ * `HOUDINI_API_URL` is an environment variable with no allowlist, so "hostile
+ * server" needs only a redirected base URL or a compromised host, not a broken
+ * library.
+ *
+ * This filters the offers before one is chosen, and the hook below refuses
+ * outright if nothing survives — so the failure is a clear error rather than a
+ * signature.
+ */
+const boundedPaymentPolicy = (maxAmount: bigint) =>
+    (_version: number, requirements: readonly PaymentRequirement[]): PaymentRequirement[] =>
+        requirements.filter((r) => {
+            if (r.network !== BASE_NETWORK) return false;
+            if (typeof r.asset !== "string" || r.asset.toLowerCase() !== USDC_BASE.toLowerCase()) return false;
+            if (typeof r.amount !== "string") return false;
+            let amount: bigint;
+            try {
+                amount = BigInt(r.amount);
+            } catch {
+                return false;
+            }
+            return amount >= 0n && amount <= maxAmount;
+        });
+
+interface PaymentRequirement {
+    scheme?: string;
+    network?: string;
+    amount?: string;
+    asset?: string;
+    payTo?: string;
+}
+
+const describe = (r?: PaymentRequirement): string =>
+    r ? `${r.amount ?? "?"} of ${r.asset ?? "?"} on ${r.network ?? "?"} to ${r.payTo ?? "?"}` : "nothing";
+
+export const createX402Fetch = (privateKey: `0x${string}`, options: X402Options = {}): typeof fetch => {
+    const maxPaymentAtomic = options.maxPaymentAtomic ?? DEFAULT_MAX_PAYMENT_ATOMIC;
     const signer = privateKeyToAccount(privateKey);
     const client = new x402Client();
     registerExactEvmScheme(client, { signer });
+
+    client.registerPolicy(
+        boundedPaymentPolicy(maxPaymentAtomic) as unknown as Parameters<typeof client.registerPolicy>[0],
+    );
+
+    // The policy filters; this makes the refusal legible instead of surfacing as
+    // the library's generic "all requirements were filtered out".
+    client.onBeforePaymentCreation(async ({ selectedRequirements }) => {
+        const r = selectedRequirements as PaymentRequirement;
+        const amount = (() => {
+            try {
+                return BigInt(r?.amount ?? "0");
+            } catch {
+                return -1n;
+            }
+        })();
+        if (
+            r?.network !== BASE_NETWORK ||
+            r?.asset?.toLowerCase() !== USDC_BASE.toLowerCase() ||
+            amount < 0n ||
+            amount > maxPaymentAtomic
+        ) {
+            return {
+                abort: true,
+                reason:
+                    `refusing to sign a payment of ${describe(r)}. ` +
+                    `This client only signs USDC on Base (${USDC_BASE}) up to ${maxPaymentAtomic} atomic units ` +
+                    `(${Number(maxPaymentAtomic) / 1e6} USDC). A server asking for more than the endpoint's price ` +
+                    "should be treated as hostile.",
+            };
+        }
+    });
+
     const httpClient = new x402HTTPClient(client);
 
     let lastPaymentTime = 0;
