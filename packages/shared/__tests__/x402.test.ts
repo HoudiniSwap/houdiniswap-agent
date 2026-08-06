@@ -103,6 +103,39 @@ describe("createX402Fetch", () => {
         ]);
     });
 
+    /**
+     * Serialisation is required — concurrent settlements from one wallet fail at
+     * the facilitator — but it means a single stalled request blocks every
+     * payment behind it. Without a timeout that is permanent and silent: the MCP
+     * server stops paying for anything, forever, with nothing logged.
+     */
+    it("does not wedge every later payment when one request hangs", async () => {
+        vi.useFakeTimers();
+        let call = 0;
+        mockFetch.mockImplementation(async (_url: string, init?: RequestInit) => {
+            const paid = Boolean((init?.headers as Record<string, string>)?.["x-payment"]);
+            if (!paid) return new Response("{}", { status: 402 });
+            call += 1;
+            if (call === 1) await new Promise(() => {}); // stalls forever
+            return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        });
+
+        const f = createX402Fetch(`0x${"11".repeat(32)}`);
+        const first = f("https://api.test/hangs").then(
+            () => "resolved",
+            (e: Error) => `rejected: ${e.message}`,
+        );
+        const second = f("https://api.test/behind-it").then(
+            (r) => `status ${r.status}`,
+            (e: Error) => `rejected: ${e.message}`,
+        );
+
+        await vi.advanceTimersByTimeAsync(180_000);
+
+        expect(await first).toMatch(/timed out/i);
+        expect(await second).toBe("status 200");
+    });
+
     it("keeps serving later payments after one fails", async () => {
         vi.useFakeTimers();
         let call = 0;
