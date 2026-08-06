@@ -56,6 +56,20 @@ describe("compactToken", () => {
         expect(out.hasDex).toBe(true);
     });
 
+    // The skill requires the agent to warn before swapping an unverified token.
+    // Stripping this field silently disabled that warning — a scam-token guard
+    // that could never fire. Caught by diffing raw vs shaped fields against the
+    // field names the skill actually references.
+    it("keeps `unverified`, which the scam-token warning depends on", () => {
+        const flagged = { ...token, unverified: true };
+        expect((compactToken(flagged) as Record<string, unknown>).unverified).toBe(true);
+    });
+
+    it("keeps `unverified` through a token list too", () => {
+        const out = compactTokenResult({ total: 1, tokens: [{ ...token, unverified: true }] }) as any;
+        expect(out.tokens[0].unverified).toBe(true);
+    });
+
     it("drops description, icon and market noise", () => {
         const out = compactToken(token) as Record<string, unknown>;
         expect(out.description).toBeUndefined();
@@ -266,6 +280,56 @@ describe("compactQuoteResult", () => {
     it("passes through a response with no quotes array", () => {
         const weird = { error: "nope" };
         expect(compactQuoteResult(weird, 5)).toBe(weird);
+    });
+
+    // The API does apply `swaps`. This is defence against anything that loses it
+    // in transit: during a live swap a `["su"]` request came back led by
+    // PancakeSwap, because an older server build had no `swaps` parameter and
+    // dropped it. Ordering from the wrong provider is not recoverable.
+    describe("swaps filter", () => {
+        const mixed = {
+            total: 4,
+            quotes: [
+                { ...quote("dex", 9), swap: "ps", swapName: "PancakeSwap" },
+                { ...quote("dex", 8), swap: "su", swapName: "SushiSwap" },
+                { ...quote("dex", 7), swap: "un", swapName: "Uniswap" },
+                { ...quote("dex", 6), swap: "su", swapName: "SushiSwap" },
+            ],
+        };
+
+        it("enforces the filter when the API ignored it", () => {
+            const out = compactQuoteResult(mixed, 5, ["su"]) as any;
+            expect(out.quotes).toHaveLength(2);
+            expect(out.quotes.every((q: any) => q.swap === "su")).toBe(true);
+            expect(out.swapsFilteredClientSide).toBe(true);
+            expect(out.requestedSwaps).toEqual(["su"]);
+        });
+
+        it("keeps the API's own total so the discrepancy stays visible", () => {
+            const out = compactQuoteResult(mixed, 5, ["su"]) as any;
+            expect(out.total).toBe(4);
+            expect(out.returned).toBe(2);
+        });
+
+        it("stays quiet when the API honoured the filter", () => {
+            const honoured = { total: 2, quotes: [mixed.quotes[1], mixed.quotes[3]] };
+            const out = compactQuoteResult(honoured, 5, ["su"]) as any;
+            expect(out.swapsFilteredClientSide).toBeUndefined();
+            expect(out.note).toBeUndefined();
+            expect(out.quotes).toHaveLength(2);
+        });
+
+        it("does nothing when no filter was requested", () => {
+            const out = compactQuoteResult(mixed, 5) as any;
+            expect(out.quotes).toHaveLength(4);
+            expect(out.swapsFilteredClientSide).toBeUndefined();
+        });
+
+        it("returns an empty set rather than the wrong provider", () => {
+            const out = compactQuoteResult(mixed, 5, ["nonexistent"]) as any;
+            expect(out.quotes).toHaveLength(0);
+            expect(out.swapsFilteredClientSide).toBe(true);
+        });
     });
 
     it("cuts a realistic payload by an order of magnitude", () => {

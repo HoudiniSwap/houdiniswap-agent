@@ -28,6 +28,10 @@ const TOKEN_KEYS = [
     "address",
     "decimals",
     "mainnet",
+    // Safety-critical: the skill requires the agent to warn before swapping an
+    // unverified token, which it cannot do if this is stripped. Absent on
+    // verified tokens, so it costs nothing on the common path.
+    "unverified",
     "hasCex",
     "hasDex",
     "hasSelfPrivate",
@@ -118,19 +122,38 @@ const compactQuote = (quote: Json): Json => pick(quote, QUOTE_KEYS);
  * Keeps the best `limitPerType` quotes of each type, preserving the order the
  * API returned (already sorted by the caller's `sort`/`sortOrder`). Reports what
  * it dropped rather than silently truncating.
+ *
+ * `requestedSwaps` is re-checked here even though the API applies it too. During
+ * a live swap, a `swaps: ["su"]` request came back led by PancakeSwap: an older
+ * server build had no `swaps` parameter and dropped it before it reached the
+ * API. Anything that silently loses the filter — version skew, a proxy, a future
+ * regression — otherwise ends with an order at the wrong provider, which is not
+ * recoverable. The check costs one array scan and reports when it had to act.
  */
 export const compactQuoteResult = (
     result: unknown,
     limitPerType: number,
+    requestedSwaps?: string[],
 ): unknown => {
     if (!result || typeof result !== "object") return result;
     const source = result as Json;
-    const quotes = source.quotes;
-    if (!Array.isArray(quotes)) return result;
+    const rawQuotes = source.quotes;
+    if (!Array.isArray(rawQuotes)) return result;
+
+    let quotes = rawQuotes as Json[];
+    let filteredClientSide = false;
+    if (requestedSwaps?.length) {
+        const wanted = new Set(requestedSwaps);
+        const matching = quotes.filter((q) => typeof q.swap === "string" && wanted.has(q.swap));
+        if (matching.length !== quotes.length) {
+            filteredClientSide = true;
+            quotes = matching;
+        }
+    }
 
     const seenPerType = new Map<string, number>();
     const kept: Json[] = [];
-    for (const quote of quotes as Json[]) {
+    for (const quote of quotes) {
         const type = typeof quote?.type === "string" ? quote.type : "unknown";
         const count = seenPerType.get(type) ?? 0;
         if (count >= limitPerType) continue;
@@ -139,10 +162,17 @@ export const compactQuoteResult = (
     }
 
     return {
-        total: source.total ?? quotes.length,
+        total: source.total ?? rawQuotes.length,
         returned: kept.length,
         omitted: quotes.length - kept.length,
         limitPerType,
+        ...(filteredClientSide
+            ? {
+                  swapsFilteredClientSide: true,
+                  requestedSwaps,
+                  note: "The API ignored the `swaps` filter (it does so for DEX quotes); it was applied here instead.",
+              }
+            : {}),
         quotes: kept,
     };
 };

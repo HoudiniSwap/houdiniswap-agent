@@ -103,9 +103,21 @@ Use the `swaps` parameter to include only specific providers:
 ```
 getQuote({ from, to, amount, swaps: ["cn", "el", "se"] })
 ```
-Provider shortNames: `cn` (ChangeNow), `el` (Exolix), `se` (StealthEx), `sz` (Swapuz), `le` (LetsExchange), `ch` (Changelly), `cl` (Changelly v2), `eb` (EasyBit), `sp` (Stealth Pay), `nx` (Nexchange), `cc` (CoinCarp), `qx` (QuickEx), etc.
+> ⚠️ **Before calling `createExchange`, check that the chosen quote's `swap` field matches what the
+> user asked for.** Ordering from the wrong provider cannot be undone. This is not hypothetical: a
+> `swaps: ["su"]` request once came back led by PancakeSwap because an older server build dropped
+> the parameter before it reached the API. `getQuote` now re-checks the filter itself and sets
+> `swapsFilteredClientSide: true` if it had to intervene — but confirm the provider anyway.
 
-Use `getSwapProviders` to get the full list with shortNames.
+**Call `getSwapProviders` to get the shortNames — do not work from a memorised list.** Providers
+are added and removed regularly, and a hardcoded list goes stale silently: passing a shortName that
+no longer exists filters away every quote and looks like "no routes available".
+
+Common ones at the time of writing (verify with `getSwapProviders`): `cn` ChangeNow, `se` StealthEx,
+`ch` ChangeHero, `cl` Changelly, `eb` EasyBit, `nx` Nexchange, `sp` Swapter, `hu`/`tc` Verified
+Partner, `sxff` FixedFloat (CEX); `un` Uniswap, `jp` Jupiter, `rd` Raydium, `ps` PancakeSwap,
+`cs` CowSwap, `zx` 0x, `su` SushiSwap, `ad` Aerodrome, `dl` deBridge, `cf` ChainFlip, `wh` Wormhole,
+`mn` Mayan, `bg` Bungee, `ni` Near Intents (DEX).
 
 ### Sorting Quotes
 - `sort: "amountOut"` — **Best price** (default). Highest output amount.
@@ -271,28 +283,53 @@ Allow the user to:
 
 1. **Always use token `id`** (ObjectId) from getTokens — never pass raw symbols to getQuote/createExchange
 2. **Always prefer `mainnet: true` tokens** — chain-specific variants (cexTokenId like "ETHETH") may not be recognized by CEX providers
-3. **Always show the deposit address** after creating an exchange — this is where the user sends funds
-4. **Always show the route selection menu** with numbered options — let the user pick
-5. **Always check for unverified tokens** and warn before proceeding
-6. **Always calculate price impact** and warn if > 2%
-7. **Check min/max** before quoting if the user's amount might be near limits
-8. **For DEX**: always require `addressFrom` (sender wallet) and `senderAddress` in quotes
-9. **For chains needing memo/tag** (XRP, XLM, ATOM): always ask for and pass `destinationTag`
-10. **Fallback**: CEX exchanges auto-fallback to the next best provider if the primary one fails
-11. **Quote expiry**: Quotes expire after ~60 seconds — create the exchange promptly after getting a quote
-12. **Never expose** private keys, API secrets, or internal partner IDs to the user
+3. **After creating an exchange, show the right thing for the swap type.** For CEX orders
+   (`isDex` absent/false) show `depositAddress` — that is where the user sends funds. For DEX
+   orders (`isDex: true`) there is nothing to deposit: show `metadata` (`to`, `data`, `value`) as
+   the transaction to sign. A DEX order's `depositAddress` echoes the sender's own address, so
+   presenting it as "send funds here" is wrong and confusing.
+4. **Read symbols from `inToken.symbol` / `outToken.symbol`, never `inSymbol` / `outSymbol`.**
+   On DEX orders the API returns token IDs in the `inSymbol`/`outSymbol` fields
+   (`"6689b757c90e45f3b3e51805"` instead of `"USDC"`). The embedded token objects are always
+   correct.
+5. **Always show the route selection menu** with numbered options — let the user pick
+6. **Always check for unverified tokens** and warn before proceeding
+7. **Always calculate price impact** and warn if > 2%
+8. **Check min/max** before quoting if the user's amount might be near limits
+9. **For DEX**: always require `addressFrom` (sender wallet) and `senderAddress` in quotes
+10. **For chains needing memo/tag** (XRP, XLM, ATOM): always ask for and pass `destinationTag`
+11. **Fallback**: CEX exchanges auto-fallback to the next best provider if the primary one fails
+12. **Quote expiry**: Quotes expire after ~60 seconds — create the exchange promptly after getting a quote
+13. **Never expose** private keys, API secrets, or internal partner IDs to the user
 
 ## Order Statuses
 
-| Status | Code | Meaning |
-|--------|------|---------|
-| WAITING | 0 | Order created, waiting for deposit |
-| CONFIRMING | 1 | Deposit received, confirming on-chain |
-| EXCHANGING | 2 | Swap in progress at the provider |
-| SENDING | 3 | Sending output to destination |
-| COMPLETED | 5 | Swap finished successfully |
-| FAILED | -1 | Swap failed (check order for reason) |
-| EXPIRED | -2 | Order expired (no deposit received in time) |
+**Read `displayStatus` or `statusLabel`, not the numeric `status`.** Every order response carries
+both, they are unambiguous, and misreporting a swap's outcome to the user is the worst mistake
+this agent can make. The numeric codes are listed only so you can recognise one if you see it.
+
+| Code | `statusLabel` | Meaning |
+|------|---------------|---------|
+| -2 | INITIALIZING | Order being set up |
+| -1 | NEW | Order created, not yet waiting on a deposit |
+| 0 | WAITING | Waiting for the user's deposit |
+| 1 | CONFIRMING | Deposit seen, confirming on-chain |
+| 2 | EXCHANGING | Swap in progress at the provider |
+| 3 | ANONYMIZING | Private swaps only — moving through the intermediate hop |
+| **4** | **FINISHED** | **Swap completed successfully** |
+| **5** | **EXPIRED** | **No deposit arrived in time — the swap did NOT happen** |
+| 6 | FAILED | Swap failed; check the order for the reason |
+| 7 | REFUNDED | Funds returned to the sender |
+| 8 | DELETED | Order removed |
+
+> ⚠️ **4 is success, 5 is expiry.** Do not report status 5 as completed. An earlier version of this
+> table had 5 as "COMPLETED", which would tell a user their swap succeeded when it had expired.
+
+`displayStatus` is the user-facing string and is the one to show: `WAITING_FOR_DEPOSIT`,
+`DEPOSIT_DETECTED`, `EXCHANGE_IN_PROGRESS`, `SENDING_TO_INTERMEDIARY`, `REACHED_INTERMEDIARY`,
+`INITIATING_SECOND_EXCHANGE`, `SECOND_EXCHANGE_IN_PROGRESS`, `SENDING_TO_RECEIVER`,
+`SWAP_COMPLETED`, `EXPIRED`, `FAILED`, `REFUNDED`, `DELETED`. The four `*_INTERMEDIARY` /
+`*_SECOND_EXCHANGE` values only occur on private (2-hop) swaps.
 
 ## x402 Costs
 
