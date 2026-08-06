@@ -37,7 +37,7 @@ const tools = createHoudiniTools({
 });
 
 const agent = new ToolLoopAgent({
-    model: anthropic("claude-sonnet-4-6"),
+    model: anthropic("claude-sonnet-5"),
     tools,
     instructions: `You are a crypto swap assistant powered by HoudiniSwap.
 You help users swap cryptocurrencies across 14 CEXes and 20+ DEXes.

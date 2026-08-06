@@ -21,7 +21,7 @@ One-time setup on npmjs.com, **per package** (`agent-shared`, `mcp-server`, `ai-
 > - Allowed actions: `npm publish`
 
 Until a package has this configured, the workflow fails on that package. Requires npm >= 11.5.1
-and Node >= 22.14.0, both pinned in the workflow.
+and Node >= 22.14.0. The workflow pins Node to major 22 and npm to major 11.
 
 The rest of this document is the **manual fallback** — for the first publish of a brand-new
 package, or if CI is unavailable.
@@ -158,7 +158,7 @@ After publishing, update the docs at `houdiniswap-backend/docs/v2/`:
 
 ## Version Bumping
 
-Dependents pin `agent-shared` at a caret range on its current version, so while it is pre-1.0 a **minor** bump of
+Bump only the packages that changed — the workflow publishes per package by diffing each version against the registry, so bumping all three just burns versions on unchanged packages. Dependents pin `agent-shared` at a caret range on its current version, so while it is pre-1.0 a **minor** bump of
 shared also requires updating that range in `mcp-server`/`ai-tools`.
 
 ```bash
