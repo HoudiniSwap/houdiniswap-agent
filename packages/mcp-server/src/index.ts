@@ -25,15 +25,38 @@ const main = async () => {
         const app = express.default();
         app.use(express.json());
 
-        const httpTransport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-        await server.connect(httpTransport);
-
+        // A transport instance serves exactly one request: reusing a single
+        // long-lived one answered the first request and then returned a bare
+        // HTTP 500 for every request after it, with nothing logged. Stateless
+        // mode wants a fresh server and transport per request, torn down when
+        // the response closes.
         app.all("/mcp", async (req, res) => {
-            // `req.body` must be passed through: express.json() above has already
-            // consumed the request stream, so without it the transport re-reads a
-            // drained stream and answers every request with "Parse error: Invalid
-            // JSON" — which is what it did.
-            await httpTransport.handleRequest(req, res, req.body);
+            const requestServer = createMcpServer(client);
+            const requestTransport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+            res.on("close", () => {
+                requestTransport.close().catch(() => {});
+                requestServer.close().catch(() => {});
+            });
+            try {
+                await requestServer.connect(requestTransport);
+                // `req.body` must be passed through: express.json() has already
+                // consumed the request stream, so without it the transport
+                // re-reads a drained stream and answers "Parse error: Invalid
+                // JSON" — which is what it did.
+                await requestTransport.handleRequest(req, res, req.body);
+            } catch (err) {
+                // Otherwise express's default handler returns an empty 500 and
+                // the cause is invisible.
+                const message = err instanceof Error ? err.message : String(err);
+                console.error(`MCP request failed: ${message}`);
+                if (!res.headersSent) {
+                    res.status(500).json({
+                        jsonrpc: "2.0",
+                        error: { code: -32603, message: `Internal server error: ${message}` },
+                        id: null,
+                    });
+                }
+            }
         });
 
         app.listen(port, () => {
