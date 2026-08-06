@@ -73,15 +73,32 @@ jobs:
           # unchanged package into an attempted re-publish, which 403s and kills
           # the whole release under `set -e`.
           remote_version_of() {
-            local name="$1" out status
-            out=$(npm view "$name" version 2>&1) && { echo "$out"; return 0; }
+            local name="$1" out err status
+            err=$(mktemp)
+            # stderr goes to a file, NOT into the value. Folding them together
+            # with 2>&1 put npm's warnings ("Unknown user config", "Ignoring
+            # workspaces") into the version string, and the semver comparison
+            # then read that as older than everything — which blocked a release.
+            out=$(npm view "$name" version 2>"$err")
             status=$?
-            if echo "$out" | grep -q "E404"; then
+
+            if [ "$status" -eq 0 ]; then
+              # Belt and braces: take the last line that is actually a semver, in
+              # case npm ever writes a notice to stdout.
+              printf '%s\n' "$out" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)*$' | tail -1
+              rm -f "$err"
+              return 0
+            fi
+
+            if grep -q "E404" "$err"; then
+              rm -f "$err"
               echo ""
               return 0
             fi
+
             echo "Registry lookup for $name failed (not a 404):" >&2
-            echo "$out" >&2
+            cat "$err" >&2
+            rm -f "$err"
             return "$status"
           }
 
