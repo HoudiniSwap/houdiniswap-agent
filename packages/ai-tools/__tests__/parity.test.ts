@@ -65,6 +65,14 @@ describe("ai-tools schema parity with the API contract", () => {
         ];
         const missing = apiParams.filter((p) => !params.includes(p));
         expect(missing, `getQuote is missing: ${missing.join(", ")}`).toEqual([]);
+
+        // Checked in both directions. GET /quotes binds the whole query object
+        // against QuoteQueryParams, which is additionalProperties:false under
+        // tsoa's throw-on-extras — so one stray parameter 422s every quote
+        // rather than being ignored. A missing-only check stays green through
+        // exactly that.
+        const extra = params.filter((p) => !apiParams.includes(p));
+        expect(extra, `getQuote sends parameters the API rejects: ${extra.join(", ")}`).toEqual([]);
     });
 
     it("getTokens exposes unverified and hasSelfPrivate", () => {

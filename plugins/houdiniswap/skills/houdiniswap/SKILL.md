@@ -171,8 +171,8 @@ Partner, `sxff` FixedFloat (CEX); `un` Uniswap, `jp` Jupiter, `rd` Raydium, `ps`
 | `dexApprove` | Get approval tx data. Params: `quoteId`, `addressFrom`, `usePermit` (optional, default true). Returns tx to sign or permit data. |
 | `dexConfirmTx` | Confirm after user submits tx. Params: `id` (houdiniId), `txHash`. Supports EVM, Solana, Bitcoin, TON, Tron, Sui hash formats. |
 | `dexChainSignatures` | Multi-step signature chain (permit + bridge). Params: `quoteId`, `addressFrom`, `previousSignature`, `signatureKey`, `signatureStep`. Call repeatedly until complete. |
-| `dexSignRequest` | Opens a loopback page so the user signs the swap in their own browser wallet. Params: `houdiniId`. Returns `{ url, token, expiresAt }`. **EVM only**, swap tx only. Free — no x402 charge. |
-| `dexSignStatus` | Poll after `dexSignRequest`. Params: `token`. Returns `pending` / `signed` (with `txHash`) / `rejected` / `expired`. Free. |
+| `dexSignRequest` | Opens a loopback page so the user signs the swap in their own browser wallet. Params: `houdiniId`. Returns `{ url, token, expiresAt }`. **EVM only**, swap tx only. Costs one status call ($0.0001) to read the order. |
+| `dexSignStatus` | Poll after `dexSignRequest`. Params: `token`. Returns `pending` / `signed` (with `txHash`) / `rejected` / `expired`. Free — answered from memory, no API call. |
 
 ### Composite
 | Tool | Description |

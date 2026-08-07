@@ -24,7 +24,7 @@ export const registerSigningTools = (server: McpServer, client: HoudiniClient) =
 
     server.tool(
         "dexSignRequest",
-        "Open a local page in the user's browser to sign a DEX swap with their own wallet. Use this instead of asking the user to handle raw transaction data. Free — makes no paid API call beyond fetching the order.",
+        "Open a local page in the user's browser to sign a DEX swap with their own wallet. Use this instead of asking the user to handle raw transaction data. Costs one status call ($0.0001) to read the order; the signing itself is local and free.",
         {
             houdiniId: z.string().describe("The Houdini order ID from createExchange"),
         },

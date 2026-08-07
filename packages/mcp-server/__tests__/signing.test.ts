@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { SigningServer } from "../src/signing/server.js";
 import { Script } from "node:vm";
+import { connect } from "node:net";
 import { summarise, renderSignPage } from "../src/signing/page.js";
 
 /**
@@ -97,6 +98,42 @@ describe("signing server", () => {
         const { url } = await s.request("H1", TX, 8453, later());
         expect((await post(url, { txHash: HASH })).status).toBe(200);
         expect((await post(url, { txHash: `0x${"b".repeat(64)}` })).status).toBe(409);
+    });
+
+    // The sequential single-use test above passes either way, because the body
+    // arrives before the next request's headers are parsed. Holding the bodies
+    // back lets every request clear the status check first, which is how three
+    // submissions were all accepted and the last hash overwrote the first.
+    it("is single use even when submissions interleave", async () => {
+        const s = make();
+        const { token } = await s.request("H1", TX, 8453, later());
+        const port = s.getPort() as number;
+
+        const submit = (hash: string) =>
+            new Promise<string>((resolve) => {
+                const body = JSON.stringify({ txHash: hash });
+                const sock = connect(port, "127.0.0.1", () => {
+                    sock.write(
+                        `POST /sign/${token} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n` +
+                            `Content-Type: application/json\r\nContent-Length: ${body.length}\r\n\r\n`,
+                    );
+                    // every set of headers lands before any body does
+                    setTimeout(() => sock.end(body), 150);
+                });
+                let resp = "";
+                sock.on("data", (d) => {
+                    resp += d;
+                });
+                sock.on("close", () => resolve(resp.split("\r\n")[0]));
+            });
+
+        const hashes = ["a", "b", "c"].map((ch) => `0x${ch.repeat(64)}`);
+        const statuses = await Promise.all(hashes.map(submit));
+        expect(statuses.filter((s2) => s2.includes("200"))).toHaveLength(1);
+        expect(statuses.filter((s2) => s2.includes("409"))).toHaveLength(2);
+        // whichever won, it must be one that was actually submitted, and it must
+        // not have been replaced afterwards
+        expect(hashes).toContain(s.status(token)?.txHash);
     });
 
     it("rejects a hash that is not a 32-byte hex value", async () => {

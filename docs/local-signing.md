@@ -65,7 +65,9 @@ order, and returns:
   "expiresAt": "2026-08-07T06:28:10.147Z", "chainId": 8453 }
 ```
 
-Free — reads the order the agent already has. No x402 payment.
+Costs one status call ($0.0001): it re-reads the order from `GET /orders/:id` rather than
+trusting one the agent is holding, so the transaction presented for signature is the one
+the API currently has on file.
 
 ### `dexSignStatus({ token })`
 
@@ -74,7 +76,8 @@ Free — reads the order the agent already has. No x402 payment.
   "txHash": "0x…", "error": "user rejected the request" }
 ```
 
-Also free. The agent polls this, then calls `dexConfirmTx` with the hash as
+Free — answered from the signer's own memory, with no API call. The agent polls this,
+then calls `dexConfirmTx` with the hash as
 usual — confirmation stays an explicit agent action rather than something the
 signing server does behind its back.
 

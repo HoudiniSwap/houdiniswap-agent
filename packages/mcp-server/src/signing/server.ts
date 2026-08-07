@@ -162,6 +162,16 @@ export class SigningServer {
             if (body.length > 4096) req.destroy();
         });
         req.on("end", () => {
+            // Checked again here, not only above. The check above runs when the
+            // headers arrive; the entry is not mutated until the body finishes.
+            // Send several sets of headers before any body and every request
+            // passes that first check, so all of them are accepted and the last
+            // hash wins — single use in name only. Nothing awaits between this
+            // test and the assignments below, so together they are atomic.
+            if (entry.status !== "pending") {
+                return this.json(res, 409, { error: `this request is already ${entry.status}` });
+            }
+
             let parsed: { txHash?: unknown; error?: unknown };
             try {
                 parsed = JSON.parse(body);
