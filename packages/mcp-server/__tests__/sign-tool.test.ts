@@ -148,3 +148,43 @@ describe("signer sharing", () => {
         await signer.close();
     });
 });
+
+describe("swap composite on an unexpected envelope", () => {
+    // GET /swaps returns a bare array where a wrapper was assumed, so a missing
+    // key is not hypothetical. This used to surface as "Cannot read properties
+    // of undefined (reading 'find')" rather than the clear message beside it.
+    it("reports the token as not found rather than a TypeError", async () => {
+        const server = new McpServer({ name: "t", version: "1" });
+        const calls: string[] = [];
+        const client = {
+            get: async (path: string) => {
+                calls.push(path);
+                return path.startsWith("/tokens") ? { total: 0 } : {};
+            },
+            post: async () => ({}),
+        } as unknown as HoudiniClient;
+
+        const { registerSwapFlowTool } = await import("../src/tools/swap-flow.js");
+        registerSwapFlowTool(server, client);
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        await server.connect(st);
+        const c = new Client({ name: "t", version: "1" }, { capabilities: {} });
+        await c.connect(ct);
+
+        const res = await c.callTool({
+            name: "swap",
+            arguments: {
+                fromSymbol: "BTC",
+                fromChain: "bitcoin",
+                toSymbol: "ETH",
+                toChain: "ethereum",
+                amount: 1,
+                addressTo: "0xabc",
+            },
+        });
+        const out = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+        expect(out.error).toContain("not found");
+        expect(out.error).not.toContain("undefined");
+        await c.close();
+    });
+});

@@ -3,8 +3,13 @@ import type { HoudiniClient, TokenResult, Token, QuoteResult, Order, MinMaxResul
 import { z } from "zod";
 import { asToolResult } from "../shape.js";
 
-const pickToken = (tokens: Token[]): Token | undefined =>
-    tokens.find(t => t.mainnet) ?? tokens[0];
+// Optional, because a response without a `tokens` key threw
+// "Cannot read properties of undefined (reading 'find')" — caught by the
+// handler below, but reported as that instead of the "Token not found"
+// message sitting right next to it. GET /swaps really does return a bare
+// array where a wrapper was assumed, so this is not hypothetical.
+const pickToken = (tokens?: Token[]): Token | undefined =>
+    tokens?.find(t => t.mainnet) ?? tokens?.[0];
 
 export const registerSwapFlowTool = (server: McpServer, client: HoudiniClient) => {
     server.tool(
