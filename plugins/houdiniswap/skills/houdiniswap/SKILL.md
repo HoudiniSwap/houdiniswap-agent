@@ -33,18 +33,24 @@ HoudiniSwap supports three swap types. **Always ask the user which type they wan
   3. `dexApprove` — get approval transaction (if needed)
   4. User signs and submits the approval tx
   5. `createExchange` with `quoteId`, `addressTo`, and `addressFrom`
-  6. User signs and submits the swap tx
+  6. `dexSignRequest` — user signs the swap in their own browser wallet (EVM)
   7. `dexConfirmTx` with the tx hash
 - **Requires**: Connected wallet with `addressFrom`. User must sign transactions.
 - **Best for**: Same-chain swaps, DeFi users, full self-custody
 - **Note**: Requires `slippage` parameter (default varies by DEX)
 - **IMPORTANT — Signing**: The MCP server's x402 private key is for USDC API payments ONLY. **Never use it to sign DEX transactions.** DEX tools return unsigned transaction data which the user must sign and submit externally. The shape is chain-dependent: EVM routes give `{to, data, value, gasLimit}`, while Solana (Jupiter) returns a hex-encoded serialized transaction in `metadata.data`, and Sui/TON/Bitcoin differ again.
-- **How users sign DEX transactions**:
-  - **Browser**: MetaMask, Rabby, or any injected wallet
-  - **Mobile**: WalletConnect QR code (future feature)
-  - **CLI/Terminal**: User can paste the raw tx data into `cast send` (Foundry) or a similar tool
-  - **Hardware wallet**: Ledger/Trezor via browser extension
-- When presenting DEX tx data, format it clearly:
+- **How users sign DEX transactions** — use `dexSignRequest` (see below). **Never ask
+  a user to paste a private key into anything**, and never tell them to run a script
+  that takes one.
+  - **EVM + browser wallet** (MetaMask, Rabby, Ledger/Trezor through the extension):
+    `dexSignRequest` → give them the link → poll `dexSignStatus`. This is the path.
+  - **Non-EVM** (Solana, Sui, TON, Bitcoin): `dexSignRequest` does not cover these —
+    the page signs through `window.ethereum`. Present the `metadata` as-is and let
+    the user submit it with their own chain's wallet.
+  - **Mobile**: not supported — a phone cannot reach the loopback port. WalletConnect
+    is future work.
+  - **Headless** (no human at a browser): not supported.
+- When you do have to present raw tx data (non-EVM only), format it clearly:
   ```
   🔐 Sign this transaction in your wallet:
     To:       0x1234...5678
@@ -165,6 +171,8 @@ Partner, `sxff` FixedFloat (CEX); `un` Uniswap, `jp` Jupiter, `rd` Raydium, `ps`
 | `dexApprove` | Get approval tx data. Params: `quoteId`, `addressFrom`, `usePermit` (optional, default true). Returns tx to sign or permit data. |
 | `dexConfirmTx` | Confirm after user submits tx. Params: `id` (houdiniId), `txHash`. Supports EVM, Solana, Bitcoin, TON, Tron, Sui hash formats. |
 | `dexChainSignatures` | Multi-step signature chain (permit + bridge). Params: `quoteId`, `addressFrom`, `previousSignature`, `signatureKey`, `signatureStep`. Call repeatedly until complete. |
+| `dexSignRequest` | Opens a loopback page so the user signs the swap in their own browser wallet. Params: `houdiniId`. Returns `{ url, token, expiresAt }`. **EVM only**, swap tx only. Free — no x402 charge. |
+| `dexSignStatus` | Poll after `dexSignRequest`. Params: `token`. Returns `pending` / `signed` (with `txHash`) / `rejected` / `expired`. Free. |
 
 ### Composite
 | Tool | Description |
@@ -219,10 +227,17 @@ Check which one you got before doing anything else — it returns
     dexApprove until it returns an empty approvals list, then:
       createExchange({ quoteId, addressTo, addressFrom })
 
-5. User signs the swap tx from the returned metadata (to/data/value)
+5. EVM: dexSignRequest({ houdiniId })  → returns a http://127.0.0.1:PORT/sign/... URL
+     → Give the user the URL. Their wallet shows its own confirmation.
+     → Poll dexSignStatus({ token }) until status is "signed" or "rejected".
+   Non-EVM: present metadata and ask the user for the hash.
 6. dexConfirmTx({ id: houdiniId, txHash: "0x..." })       → returns a bare true/false
 7. getOrder(houdiniId) → Track completion
 ```
+
+`dexSignRequest` only signs the **swap** transaction, because it reads it from the
+order — and at step 4b no order exists yet. Approval transactions still have to be
+presented to the user directly.
 
 Omitting `signatures` on the permit path is a dead end: the approval never
 reaches the router and the swap cannot execute.

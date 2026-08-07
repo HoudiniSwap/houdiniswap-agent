@@ -68,6 +68,8 @@ const EXPECTED_TOOLS = [
     "dexCheckAllowance",
     "dexConfirmTx",
     "dexChainSignatures",
+    "dexSignRequest",
+    "dexSignStatus",
     "swap",
 ];
 
@@ -95,7 +97,7 @@ beforeEach(() => {
 
 describe("MCP Server", () => {
     describe("initialization", () => {
-        it("registers all 13 tools (14 including swap)", async () => {
+        it("registers all 15 tools (16 including swap)", async () => {
             const { tools } = await mcpClient.listTools();
             const toolNames = tools.map((t) => t.name).sort();
             expect(toolNames).toEqual(EXPECTED_TOOLS.sort());

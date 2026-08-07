@@ -10,6 +10,7 @@ import { registerSwapProviderTools } from "./tools/swaps.js";
 import { registerMinMaxTools } from "./tools/minmax.js";
 import { registerDexTools } from "./tools/dex.js";
 import { registerSwapFlowTool } from "./tools/swap-flow.js";
+import { registerSigningTools } from "./tools/sign.js";
 import { registerResources } from "./resources/openapi.js";
 
 // Read from package.json rather than hardcoding: this is the version MCP clients
@@ -32,6 +33,7 @@ export const createMcpServer = (client: HoudiniClient): McpServer => {
     registerMinMaxTools(server, client);
     registerDexTools(server, client);
     registerSwapFlowTool(server, client);
+    registerSigningTools(server, client);
 
     // Register resources
     registerResources(server, client);
