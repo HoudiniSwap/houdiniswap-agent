@@ -2,7 +2,7 @@
   "name": "houdiniswap",
   "displayName": "HoudiniSwap Swap Agent",
   "description": "Discover, quote, and execute crypto swaps across 14 CEXes and 20+ DEXes via HoudiniSwap, with x402 pay-per-call (USDC on Base — no signup).",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "author": {
     "name": "HoudiniSwap",
     "url": "https://houdiniswap.com"

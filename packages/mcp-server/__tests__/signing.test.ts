@@ -30,10 +30,19 @@ afterEach(async () => {
     servers = [];
 });
 
+/**
+ * Browsers set Origin on every request whose method is not GET or HEAD, so the
+ * signing page always sends one and the server now requires it. This models
+ * that; `noOrigin` below covers the client that does not.
+ */
 const post = (url: string, body: unknown, headers: Record<string, string> = {}) =>
     fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...headers },
+        headers: {
+            "Content-Type": "application/json",
+            Origin: new URL(url).origin,
+            ...headers,
+        },
         body: JSON.stringify(body),
     });
 
@@ -115,7 +124,8 @@ describe("signing server", () => {
                 const sock = connect(port, "127.0.0.1", () => {
                     sock.write(
                         `POST /sign/${token} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n` +
-                            `Content-Type: application/json\r\nContent-Length: ${body.length}\r\n\r\n`,
+                            `Content-Type: application/json\r\nOrigin: http://127.0.0.1:${port}\r\n` +
+                            `Content-Length: ${body.length}\r\n\r\n`,
                     );
                     // every set of headers lands before any body does
                     setTimeout(() => sock.end(body), 150);
@@ -159,6 +169,21 @@ describe("signing server", () => {
         expect(res.status).toBe(415);
     });
 
+    // docs/local-signing.md said "requires ... a same-origin Origin header;
+    // anything else is rejected", but the check only fired when the header was
+    // present, so a raw socket omitting it was accepted.
+    it("refuses a submission with no Origin at all", async () => {
+        const s = make();
+        const { url, token } = await s.request("H1", TX, 8453, later());
+        const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ txHash: HASH }),
+        });
+        expect(res.status).toBe(403);
+        expect(s.status(token)?.status).toBe("pending");
+    });
+
     it("refuses a cross-origin submission", async () => {
         const s = make();
         const { url } = await s.request("H1", TX, 8453, later());
@@ -180,6 +205,79 @@ describe("signing server", () => {
         await post(a.url, { txHash: HASH });
         expect(s.status(a.token)?.status).toBe("signed");
         expect(s.status(b.token)?.status).toBe("pending");
+    });
+
+    // BigInt throws on anything that is not an integer literal, and this runs
+    // inside the HTTP request listener — so it was an uncaughtException that
+    // killed the whole MCP server, taking the pending map with it. "1e+21" is
+    // what JSON.stringify produces for a large number that went through a
+    // float, so a real order could reach it.
+    it("renders an unreadable value instead of throwing", async () => {
+        const s = make();
+        const { url } = await s.request("H1", { ...TX, value: "1e+21" }, 8453, later());
+        const res = await fetch(url);
+        expect(res.status).toBe(200);
+        expect(await res.text()).toContain("UNREADABLE");
+    });
+
+    // Defence in depth for whatever the next unrenderable field turns out to
+    // be. `data` is filtered by dexSignRequest, so this reaches the server the
+    // way a future gap would: through request() directly.
+    it("answers 500 and stays alive when rendering throws", async () => {
+        const s = make();
+        const broken = { to: TX.to, value: "0" } as unknown as typeof TX;
+        const { url } = await s.request("H1", broken, 8453, later());
+        expect((await fetch(url)).status).toBe(500);
+        // the process is still here, and so is the listener
+        const ok = await s.request("H2", TX, 8453, later());
+        expect((await fetch(ok.url)).status).toBe(200);
+    });
+
+    it("says so in the page rather than showing a wrong amount", () => {
+        const html = renderSignPage({ ...TX, value: "1.5" }, 8453, "H1", "t".repeat(64));
+        expect(html).toContain("UNREADABLE");
+        expect(html).toContain("do not sign");
+    });
+
+    // The chain does not care that our quote lapsed. If the user was still in
+    // their wallet when it expired, the transaction is on-chain and the hash
+    // has to be recordable — otherwise dexSignStatus tells them the token is
+    // unknown and invites them to pay for a second swap they already made.
+    it("still records a signature that arrives after expiry", async () => {
+        const s = make();
+        const { url, token } = await s.request("H1", TX, 8453, Date.now() - 1000);
+        expect(s.status(token)?.status).toBe("expired");
+        expect((await fetch(url)).status).toBe(404); // page is not served any more
+        expect((await post(url, { txHash: HASH })).status).toBe(200);
+        expect(s.status(token)?.status).toBe("signed");
+        expect(s.status(token)?.txHash).toBe(HASH);
+    });
+
+    // req.destroy() alone meant 'end' never fired and no response was ever
+    // sent, so the page's report() saw a socket error, swallowed it, and the
+    // agent polled a request that stayed pending forever.
+    it("answers an oversize body instead of hanging up silently", async () => {
+        const s = make();
+        const { url, token } = await s.request("H1", TX, 8453, later());
+        const res = await post(url, { txHash: HASH, junk: "x".repeat(20_000) }).catch(() => undefined);
+        expect(res?.status).toBe(413);
+        expect(s.status(token)?.status).toBe("pending");
+    });
+
+    // Two dexSignRequest calls in flight together both saw no port and both
+    // bound. Only the second was remembered, so the first page's own POST was
+    // judged cross-origin and refused after the user had already signed.
+    it("binds one listener when requests are concurrent", async () => {
+        const s = make();
+        const [a, b] = await Promise.all([
+            s.request("A", TX, 8453, later()),
+            s.request("B", TX, 8453, later()),
+        ]);
+        expect(new URL(a.url).port).toBe(new URL(b.url).port);
+        expect(new URL(a.url).port).toBe(String(s.getPort()));
+        // both pages can report, which is what the second listener broke
+        expect((await post(a.url, { txHash: HASH })).status).toBe(200);
+        expect((await post(b.url, { txHash: `0x${"b".repeat(64)}` })).status).toBe(200);
     });
 
     it("caps the request body", async () => {

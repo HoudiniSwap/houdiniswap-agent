@@ -4,6 +4,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { HoudiniClient } from "@houdiniswap/agent-shared";
 import { registerSigningTools } from "../src/tools/sign.js";
+import { SigningServer } from "../src/signing/server.js";
 
 /**
  * The order below is a real GET /orders/:id response (trimmed), not one written
@@ -108,5 +109,42 @@ describe("dexSignRequest against the real order shape", () => {
     it("reports plainly when the chain cannot be determined", async () => {
         const out = await callSign({ ...RAW_ORDER, inToken: { symbol: "USDC" } });
         expect(out.error).toContain("Could not determine the chain");
+    });
+});
+
+describe("signer sharing", () => {
+    // The HTTP transport builds a fresh McpServer per request. A signer created
+    // inside registerSigningTools was discarded with it, so dexSignRequest and
+    // the dexSignStatus that followed ran against different instances and the
+    // token was always unknown — plus each request leaked a listening socket.
+    it("uses the injected signer so state survives across servers", async () => {
+        const shared = new SigningServer();
+        const call = async (name: string, args: Record<string, unknown>) => {
+            const server = new McpServer({ name: "t", version: "1" });
+            registerSigningTools(server, stubClient(RAW_ORDER), shared);
+            const [ct, st] = InMemoryTransport.createLinkedPair();
+            await server.connect(st);
+            const client = new Client({ name: "t", version: "1" }, { capabilities: {} });
+            await client.connect(ct);
+            const res = await client.callTool({ name, arguments: args });
+            await client.close();
+            return JSON.parse((res.content as Array<{ text: string }>)[0].text);
+        };
+
+        // request on one server instance...
+        const req = await call("dexSignRequest", { houdiniId: RAW_ORDER.houdiniId });
+        expect(req.token).toBeTruthy();
+        // ...status on a different one, as the HTTP transport does
+        const status = await call("dexSignStatus", { token: req.token });
+        expect(status.status).toBe("pending");
+
+        await shared.close();
+    });
+
+    it("mints its own signer when none is injected", async () => {
+        const server = new McpServer({ name: "t", version: "1" });
+        const signer = registerSigningTools(server, stubClient(RAW_ORDER));
+        expect(signer).toBeInstanceOf(SigningServer);
+        await signer.close();
     });
 });

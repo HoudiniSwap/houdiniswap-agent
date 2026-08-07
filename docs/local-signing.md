@@ -1,12 +1,15 @@
 # Local browser signing for DEX swaps
 
+> Shipped in `@houdiniswap/mcp-server` 0.1.11 and hardened since. This describes
+> what the code does; where it once read as a proposal, it now reads as a record.
+
 ## Problem
 
 DEX swaps return unsigned transaction data that the user must sign themselves. The
 x402 key cannot be used — it exists only to pay for API calls, and the skill
 forbids using it for DEX transactions.
 
-Today the documented path is a Node script that asks the user to paste their
+The path this replaced was a Node script that asked the user to paste their
 private key. That works, but it is the wrong thing to teach: pasting a private
 key into a program is the exact habit phishing depends on. It is also awkward —
 it needs a real terminal, because a piped stdin cannot prompt with echo off.
@@ -92,9 +95,12 @@ to sign, so it is treated as security-relevant.
 | Another local process asks the user to sign something | The token is 32 random bytes from `crypto.randomBytes`, single use, and bound to one order. Without it the route 404s. |
 | Attacker supplies their own calldata | The page never accepts a transaction from the URL or the request body. The server holds it in memory, taken from the order the agent created. |
 | Token reuse / replay | Consumed on first successful POST. A second POST 409s. |
-| Stale requests accumulating | Each expires with its quote, and a sweep removes expired entries. The listener shuts down when none remain. |
-| Page loading remote code | Everything is inline. CSP: `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'`. No CDN, no fonts, no analytics. |
-| Cross-site requests to the listener | POST requires `Content-Type: application/json` and a same-origin `Origin` header; anything else is rejected. Browsers will not send a JSON content-type cross-origin without a preflight, which is not answered. |
+| Stale requests accumulating | Each expires with the order, and a sweep removes entries five minutes past that. The grace matters: a user still in their wallet when the quote lapses has a transaction on chain, and the hash has to remain recordable — the page stops being served at expiry, but a POST is still accepted. The listener shuts down when none remain. |
+| Page loading remote code | Everything is inline. CSP: `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; form-action 'none'; frame-ancestors 'none'`. No CDN, no fonts, no analytics. |
+| Cross-site requests to the listener | POST requires `Content-Type: application/json` and an `Origin` matching the port the request arrived on. The header is *required*, not merely checked when present — a raw socket omitting it used to be accepted. Browsers will not send a JSON content-type cross-origin without a preflight, which is not answered. |
+| Two submissions racing | The status is re-checked inside the body-end handler, where nothing awaits before the assignment. Checking only when the headers arrived meant several POSTs with delayed bodies were all accepted and the last hash won. |
+| A malformed field taking the server down | Rendering happens before the status line is written, and the whole handler is wrapped: a throw returns 500 instead of an uncaughtException that would kill every tool and lose the pending map. `value` is validated when the request is created. |
+| Untrusted text reaching the model | A wallet message or contract revert string is capped in the page, capped again at 300 characters, and handed to the agent quoted and labelled as untrusted rather than bare. |
 | Wallet on the wrong network | The page checks `chainId` and asks the wallet to switch before offering to sign. |
 | User cannot verify what they are signing | The page shows amount in, amount out and recipient — taken from the order, since decoding calldata would need each router's ABI — plus the network, the contract being called and the native value, above the sign button. The wallet shows its own review on top of that. |
 
@@ -112,8 +118,20 @@ anything to disk.
 - **No headless use.** An agent running without a human at a browser cannot use
   this. That case still needs a key, and should stay explicitly opt-in.
 
+## What the page does before the wallet opens
+
+- Checks the connected account matches the order's `from`, and refuses otherwise.
+- Asks the wallet to switch network if it is not on the order's chain.
+- Converts `value` from the decimal string the API returns into the hex quantity
+  `eth_sendTransaction` expects. `"0"` is identical in both, so this was invisible
+  until the first swap that actually sent native value.
+- Estimates gas itself and passes an explicit limit. Left to fill it in, a wallet
+  whose own estimate does not arrive substitutes a block-sized default —
+  140,000,000 against Base's 25,000,000 cap — and the RPC rejects the send after
+  the user has already approved it.
+
 ## Migration
 
-The signing script stays for testing, but stops being the documented path. The
-skill's DEX workflow points at `dexSignRequest` instead, and the "paste the raw
-tx data into `cast send`" line goes away.
+Done. The skill's DEX workflow points at `dexSignRequest`, and the "paste the raw
+tx data into `cast send`" line is gone. The signing script remains only for
+testing.

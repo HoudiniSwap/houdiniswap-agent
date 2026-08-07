@@ -11,13 +11,25 @@ import { registerMinMaxTools } from "./tools/minmax.js";
 import { registerDexTools } from "./tools/dex.js";
 import { registerSwapFlowTool } from "./tools/swap-flow.js";
 import { registerSigningTools } from "./tools/sign.js";
+import type { SigningServer } from "./signing/server.js";
 import { registerResources } from "./resources/openapi.js";
 
 // Read from package.json rather than hardcoding: this is the version MCP clients
 // display, and it had been stuck at 0.1.0 across every release since.
 const { version } = createRequire(import.meta.url)("../package.json") as { version: string };
 
-export const createMcpServer = (client: HoudiniClient): McpServer => {
+export interface McpServerOptions {
+    /** Shared across requests by the HTTP transport; see registerSigningTools. */
+    signer?: SigningServer;
+    /**
+     * Off when the listener is not on loopback. The signing page is safe
+     * because only the person at that machine can reach it; served from a host
+     * the user does not control, that stops being true.
+     */
+    signing?: boolean;
+}
+
+export const createMcpServer = (client: HoudiniClient, options: McpServerOptions = {}): McpServer => {
     const server = new McpServer({
         name: "houdiniswap",
         version,
@@ -33,7 +45,7 @@ export const createMcpServer = (client: HoudiniClient): McpServer => {
     registerMinMaxTools(server, client);
     registerDexTools(server, client);
     registerSwapFlowTool(server, client);
-    registerSigningTools(server, client);
+    if (options.signing !== false) registerSigningTools(server, client, options.signer);
 
     // Register resources
     registerResources(server, client);

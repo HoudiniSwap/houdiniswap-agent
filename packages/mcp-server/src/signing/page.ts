@@ -73,10 +73,24 @@ export const summarise = (
     if (order.receiverAddress) rows.push({ label: "Recipient", value: order.receiverAddress });
 
     rows.push({ label: "Contract", value: tx.to });
-    const value = BigInt(tx.value ?? "0");
+    // BigInt throws on anything that is not an integer literal — "1.5", "abc",
+    // and notably "1e+21", which is what JSON.stringify gives for a large
+    // number that went through a float. Never let that escape: this runs
+    // inside the HTTP handler.
+    let value: bigint | undefined;
+    try {
+        value = BigInt(tx.value ?? "0");
+    } catch {
+        value = undefined;
+    }
     rows.push({
         label: "Native value sent",
-        value: value === 0n ? "none" : `${(Number(value) / 1e18).toFixed(8)} (native units)`,
+        value:
+            value === undefined
+                ? `UNREADABLE (${String(tx.value)}) — do not sign`
+                : value === 0n
+                  ? "none"
+                  : `${(Number(value) / 1e18).toFixed(8)} (native units)`,
     });
     rows.push({ label: "Calldata", value: `${tx.data.slice(0, 34)}… (${tx.data.length - 2} hex chars)` });
     return rows;
@@ -212,7 +226,9 @@ export const renderSignPage = (
         const est = await window.ethereum.request({ method: "eth_estimateGas", params: [call] });
         gas = "0x" + ((BigInt(est) * 12n) / 10n).toString(16);
       } catch (err) {
-        const why = (err && (err.data && err.data.message || err.message)) || "unknown error";
+        // The revert string is chosen by the contract being called, so a
+        // hostile route controls it. Cap it here rather than posting a blob.
+        const why = String((err && (err.data && err.data.message || err.message)) || "unknown error").slice(0, 200);
         say("This swap would fail on-chain, so nothing was sent: " + why, "bad");
         await report({ error: "gas estimation failed: " + why });
         return;

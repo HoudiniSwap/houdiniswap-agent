@@ -104,6 +104,13 @@ npx -y @houdiniswap/mcp-server --transport=http
 | `dexCheckAllowance` | $0.0001 | Check token allowance |
 | `dexConfirmTx` | $0.01 | Confirm DEX transaction |
 | `dexChainSignatures` | $0.0001 | Multi-step signature chain |
+| `dexSignRequest` | $0.0001 | Open a loopback page so the user signs the swap in their own browser wallet (EVM) |
+| `dexSignStatus` | free | Poll for the result of that signature |
+
+`dexSignRequest` is how a user should sign a DEX swap: it serves a page on `127.0.0.1` and hands
+the transaction to their wallet, so no private key is ever pasted anywhere. EVM only, and it signs
+the swap rather than the approval — the approval happens before an order exists. See
+[docs/local-signing.md](docs/local-signing.md).
 
 ### Composite Tool
 
