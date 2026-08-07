@@ -15,7 +15,10 @@ const RAW_ORDER = {
     houdiniId: "uUYQpvRARQpSEfhY4MBCFA",
     status: 0,
     isDex: true,
-    expires: "2026-08-07T09:06:03.275Z",
+    // Relative, not the timestamp this order really carried. Copying that
+    // verbatim made the suite pass on the day and 404 forever after, because
+    // the signer stops serving an expired request.
+    expires: new Date(Date.now() + 30 * 60_000).toISOString(),
     receiverAddress: "0xe75b49d793c835Caf6754C63AF2f0d472e537D73",
     inAmount: 5.5,
     // DEX orders carry token ids here, not tickers
