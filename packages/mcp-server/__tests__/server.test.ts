@@ -598,3 +598,118 @@ describe("mutation-audit gaps", () => {
         expect(mockClient.calls.find((c) => c.path === "/chains")?.data).toMatchObject({ page: 1, pageSize: 100 });
     });
 });
+
+/**
+ * No test in the repo ever passed `verbose: true`. The escape hatch documented
+ * on every tool was entirely unexercised — and `createExchange` forwarding it
+ * into the POST body would 422 every verbose order, since the API rejects
+ * unknown properties (the same reason `address` vs `addressFrom` failed).
+ */
+describe("verbose is honoured and never forwarded", () => {
+    const raw = {
+        total: 1,
+        tokens: [{ id: "t", symbol: "ETH", description: "long prose", icon: "http://x/i.png", chainData: { name: "Ethereum Mainnet", chainId: 1 } }],
+    };
+
+    it("getTokens returns the raw payload when verbose", async () => {
+        mockClient.mockGet("/tokens", raw);
+        const res = await mcpClient.callTool({ name: "getTokens", arguments: { symbol: "ETH", verbose: true } });
+        const out = JSON.parse((res.content as any)[0].text);
+        expect(out.tokens[0].description).toBe("long prose");
+        expect(out.tokens[0].icon).toBeDefined();
+    });
+
+    it("getTokens shapes it when verbose is absent", async () => {
+        mockClient.mockGet("/tokens", raw);
+        const res = await mcpClient.callTool({ name: "getTokens", arguments: { symbol: "ETH" } });
+        const out = JSON.parse((res.content as any)[0].text);
+        expect(out.tokens[0].description).toBeUndefined();
+        expect(out.tokens[0].chainName).toBe("Ethereum Mainnet");
+    });
+
+    it.each([
+        ["getTokens", "/tokens", { symbol: "ETH", verbose: true }],
+        ["getChains", "/chains", { verbose: true }],
+        ["getOrders", "/orders", { verbose: true }],
+        ["getSwapProviders", "/swaps", { verbose: true }],
+        ["getQuote", "/quotes", { from: "a", to: "b", amount: 1, verbose: true }],
+    ])("%s never forwards verbose to the API", async (tool, path, args) => {
+        mockClient.mockGet(path, { total: 0, tokens: [], chains: [], orders: [], quotes: [], swaps: [] });
+        await mcpClient.callTool({ name: tool, arguments: args });
+        const call = mockClient.calls.find((c) => c.path === path);
+        expect(call?.data).not.toHaveProperty("verbose");
+    });
+
+    it("createExchange never forwards verbose into the POST body", async () => {
+        mockClient.mockPost("/exchanges", { houdiniId: "H1" });
+        await mcpClient.callTool({
+            name: "createExchange",
+            arguments: { quoteId: "q1", addressTo: "0xabc", verbose: true },
+        });
+        const call = mockClient.calls.find((c) => c.path === "/exchanges");
+        expect(call?.data).not.toHaveProperty("verbose");
+        expect(call?.data).toEqual({ quoteId: "q1", addressTo: "0xabc" });
+    });
+
+    it("getOrder honours verbose", async () => {
+        mockClient.mockGet("/orders/", { houdiniId: "H1", inToken: { id: "t", symbol: "E", description: "prose" } });
+        const res = await mcpClient.callTool({ name: "getOrder", arguments: { houdiniId: "H1", verbose: true } });
+        expect(JSON.parse((res.content as any)[0].text).inToken.description).toBe("prose");
+    });
+});
+
+/**
+ * Only dexApprove asserted its HTTP verb. The other three could have switched to
+ * GET — which for dexConfirmTx is the $0.01 endpoint, and for
+ * dexChainSignatures would serialise previousSignature as [object Object].
+ */
+describe("DEX tools use POST", () => {
+    it.each([
+        ["dexApprove", "/dex/approve", { quoteId: "q", addressFrom: "0xa" }],
+        ["dexCheckAllowance", "/dex/allowance", { quoteId: "q", addressFrom: "0xa" }],
+        ["dexConfirmTx", "/dex/confirmTx", { id: "abc", txHash: "0xh" }],
+        ["dexChainSignatures", "/dex/chainSignatures", {
+            quoteId: "q", addressFrom: "0xa",
+            previousSignature: { signature: "0xs", key: "permit" }, signatureKey: "permit", signatureStep: 1,
+        }],
+    ])("%s posts to %s", async (tool, path, args) => {
+        mockClient.mockPost(path, { ok: true });
+        await mcpClient.callTool({ name: tool, arguments: args });
+        const call = mockClient.calls.find((c) => c.path === path);
+        expect(call?.method, `${tool} must POST`).toBe("POST");
+    });
+});
+
+/**
+ * The swaps re-filter was only ever tested by calling compactQuoteResult
+ * directly — the wiring that feeds it `params.swaps` was not, so getQuote could
+ * stop passing it and the filter that exists because a live order went to the
+ * wrong provider would silently stop running.
+ */
+describe("getQuote wires the swaps re-filter", () => {
+    it("applies the filter to the response, not just the request", async () => {
+        mockClient.mockGet("/quotes", {
+            total: 2,
+            quotes: [
+                { quoteId: "a", type: "standard", swap: "ps", swapName: "PancakeSwap", amountOut: 9 },
+                { quoteId: "b", type: "standard", swap: "su", swapName: "SushiSwap", amountOut: 8 },
+            ],
+        });
+        const res = await mcpClient.callTool({
+            name: "getQuote",
+            arguments: { from: "a", to: "b", amount: 1, swaps: ["su"] },
+        });
+        const out = JSON.parse((res.content as any)[0].text);
+        expect(out.quotes.every((q: any) => q.swap === "su")).toBe(true);
+        expect(out.swapsFilteredClientSide).toBe(true);
+    });
+
+    it("uses the documented limitPerType default of 5", async () => {
+        mockClient.mockGet("/quotes", {
+            total: 20,
+            quotes: Array.from({ length: 20 }, (_, i) => ({ quoteId: `q${i}`, type: "standard", swap: "cn", amountOut: 20 - i })),
+        });
+        const res = await mcpClient.callTool({ name: "getQuote", arguments: { from: "a", to: "b", amount: 1 } });
+        expect(JSON.parse((res.content as any)[0].text).quotes).toHaveLength(5);
+    });
+});

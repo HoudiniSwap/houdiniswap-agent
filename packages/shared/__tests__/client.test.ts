@@ -331,3 +331,123 @@ describe("path traversal — encoded and backslash variants", () => {
         expect(mockFetch.mock.calls[1][0]).toContain("/v2/tokens?symbol=BTC");
     });
 });
+
+/**
+ * Auth was asserted on GET only. Every authenticated POST — createExchange at
+ * $0.01, and all four DEX tools — could have gone out unauthenticated with
+ * nothing failing.
+ */
+describe("POST carries auth and headers", () => {
+    it("sends the Authorization header on POST for apiKey auth", async () => {
+        mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }));
+        const client = new HoudiniClient({ auth: { type: "apiKey", key: "p1:secret" } });
+        await client.post("/exchanges", { quoteId: "q" });
+        const [, opts] = mockFetch.mock.calls[0];
+        expect(opts.headers.Authorization).toBe("p1:secret");
+    });
+
+    it("sends partner-id on POST for partnerId auth", async () => {
+        mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }));
+        const client = new HoudiniClient({ auth: { type: "partnerId", id: "abc" } });
+        await client.post("/dex/approve", {});
+        const [, opts] = mockFetch.mock.calls[0];
+        expect(opts.headers["partner-id"]).toBe("abc");
+    });
+
+    it("uses the POST verb and sends Accept on both verbs", async () => {
+        mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }));
+        const client = new HoudiniClient({ auth: { type: "none" } });
+        await client.post("/exchanges", { a: 1 });
+        expect(mockFetch.mock.calls[0][1].method).toBe("POST");
+        expect(mockFetch.mock.calls[0][1].headers.Accept).toBe("application/json");
+
+        mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }));
+        await client.get("/tokens");
+        expect(mockFetch.mock.calls[1][1].method).toBe("GET");
+        expect(mockFetch.mock.calls[1][1].headers.Accept).toBe("application/json");
+    });
+});
+
+/**
+ * Array-valued params — `swaps`, `types`, and the four leg filters — are
+ * serialised as repeated keys. Collapsing them to one comma-joined value
+ * survived: the MCP tests use a mock client, so arrays never reached the real
+ * serialiser.
+ */
+describe("array parameter serialisation", () => {
+    it("repeats the key rather than comma-joining", async () => {
+        mockFetch.mockResolvedValueOnce(jsonResponse({ quotes: [] }));
+        const client = new HoudiniClient({ auth: { type: "none" } });
+        await client.get("/quotes", { types: ["standard", "private"], swaps: ["cn", "se"] });
+        const url = new URL(mockFetch.mock.calls[0][0] as string);
+        expect(url.searchParams.getAll("types")).toEqual(["standard", "private"]);
+        expect(url.searchParams.getAll("swaps")).toEqual(["cn", "se"]);
+        expect(url.search).not.toContain("standard%2Cprivate");
+    });
+});
+
+/**
+ * `withTimeout` had no tests at all — the 30s bound could be removed or raised
+ * silently, which is how an unbounded request pins a per-request server.
+ */
+describe("request timeout", () => {
+    it("aborts a request that never settles", async () => {
+        vi.useFakeTimers();
+        mockFetch.mockImplementation((_u: string, init?: RequestInit) =>
+            new Promise((_res, rej) => {
+                init?.signal?.addEventListener("abort", () => rej(new Error("aborted")));
+            }));
+        const client = new HoudiniClient({ auth: { type: "none" }, timeoutMs: 5_000 });
+        const p = client.get("/tokens").then(() => "resolved", (e: Error) => e.message);
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(await p).toMatch(/timed out after 5000ms/);
+        vi.useRealTimers();
+    });
+
+    it("passes an abort signal to fetch", async () => {
+        mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }));
+        const client = new HoudiniClient({ auth: { type: "none" } });
+        await client.get("/tokens");
+        expect(mockFetch.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+    });
+});
+
+/**
+ * The facilitator reason and per-field validation details both had no test, and
+ * a non-JSON error body collapsing to "Unknown error" would re-introduce a
+ * documented regression.
+ */
+describe("error message content", () => {
+    it("surfaces the facilitator reason on a 402", () => {
+        const err = new HoudiniApiError(402, { error: "invalid_exact_evm_transaction_failed" }, "x402");
+        expect(err.message).toContain("invalid_exact_evm_transaction_failed");
+    });
+
+    it("renders per-field validation details", () => {
+        const err = new HoudiniApiError(422, {
+            code: "VALIDATION_ERROR", message: "Validation Failed",
+            fields: { addressFrom: { message: "'addressFrom' is required" } },
+        });
+        expect(err.message).toContain("addressFrom");
+        expect(err.message).toContain("'addressFrom' is required");
+    });
+
+    it("explains a non-JSON error body instead of saying Unknown error", async () => {
+        mockFetch.mockResolvedValueOnce(
+            new Response("<h1>502 Bad Gateway</h1>", { status: 502, headers: { "Content-Type": "text/html" } }));
+        const client = new HoudiniClient({ auth: { type: "none" } });
+        try {
+            await client.get("/chains");
+            expect.unreachable("should have thrown");
+        } catch (err) {
+            const m = (err as Error).message;
+            expect(m).not.toContain("Unknown error");
+            expect(m).toContain("non-JSON body");
+            expect(m).toContain("text/html");
+        }
+    });
+
+    it("includes the status number in the message", () => {
+        expect(new HoudiniApiError(404, { code: "NOT_FOUND", message: "Not found" }).message).toContain("404");
+    });
+});

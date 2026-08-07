@@ -6,6 +6,7 @@ const paymentEvents: Array<{ id: number; phase: "sign" | "retry-done"; at: numbe
 let paymentSeq = 0;
 let activePayments = 0;
 let maxConcurrentPayments = 0;
+let stallSigning = false;
 
 vi.mock("viem/accounts", () => ({
     privateKeyToAccount: vi.fn(() => ({ address: "0xtest" })),
@@ -43,6 +44,7 @@ vi.mock("@x402/core/client", () => ({
         }
 
         async createPaymentPayload(paymentRequired: { accepts?: Array<Record<string, unknown>> }) {
+            if (stallSigning) await new Promise(() => {});
             let candidates = paymentRequired?.accepts ?? [];
             for (const policy of this.policies) {
                 candidates = policy(2, candidates);
@@ -85,6 +87,7 @@ beforeEach(() => {
     paymentSeq = 0;
     activePayments = 0;
     maxConcurrentPayments = 0;
+    stallSigning = false;
     mockFetch.mockReset();
     // Unpaid request -> 402; paid retry (carries x-payment) -> 200.
     mockFetch.mockImplementation(async (_url: string, init?: RequestInit) => {
@@ -383,5 +386,89 @@ describe("payment interval floor", () => {
         for (let i = 1; i < signs.length; i++) {
             expect(signs[i] - signs[i - 1], `gap ${i} was ${signs[i] - signs[i - 1]}ms`).toBeGreaterThanOrEqual(5000);
         }
+    });
+});
+
+/**
+ * The paid retry is rebuilt from `url` + `init`. Every test above calls
+ * `f(url)` with no init at all, so a paid POST — createExchange, and all four
+ * DEX tools — was never exercised. Dropping the spread would retry a paid POST
+ * as a bodyless GET *after* the $0.01 is already signed, and nothing failed.
+ */
+describe("paid retry preserves the request", () => {
+    const paidCalls: RequestInit[] = [];
+
+    beforeEach(() => {
+        paidCalls.length = 0;
+        mockFetch.mockReset();
+        mockFetch.mockImplementation(async (_url: string, init?: RequestInit) => {
+            const paid = Boolean((init?.headers as Record<string, string>)?.["x-payment"]);
+            if (!paid) return new Response("{}", { status: 402 });
+            paidCalls.push(init ?? {});
+            return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        });
+    });
+
+    it("retries a POST as a POST, with its body intact", async () => {
+        const f = createX402Fetch(`0x${"11".repeat(32)}`);
+        const body = JSON.stringify({ quoteId: "q1", addressTo: "0xabc" });
+        await f("https://api.test/exchanges", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body,
+        });
+
+        expect(paidCalls).toHaveLength(1);
+        expect(paidCalls[0].method, "a paid POST must not become a GET").toBe("POST");
+        expect(paidCalls[0].body, "the body must survive the retry").toBe(body);
+    });
+
+    it("keeps the caller's headers alongside the payment header", async () => {
+        const f = createX402Fetch(`0x${"11".repeat(32)}`);
+        await f("https://api.test/exchanges", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json", "partner-id": "p1" },
+            body: "{}",
+        });
+
+        const headers = paidCalls[0].headers as Record<string, string>;
+        expect(headers["Content-Type"]).toBe("application/json");
+        expect(headers.Accept).toBe("application/json");
+        expect(headers["partner-id"]).toBe("p1");
+        expect(headers["x-payment"]).toBeDefined();
+    });
+
+    it("re-reads the same body on the retry rather than consuming it", async () => {
+        const f = createX402Fetch(`0x${"11".repeat(32)}`);
+        const body = JSON.stringify({ big: "x".repeat(500) });
+        await f("https://api.test/exchanges", { method: "POST", body });
+        expect(paidCalls[0].body).toBe(body);
+    });
+
+    it("retries against the original URL", async () => {
+        const f = createX402Fetch(`0x${"11".repeat(32)}`);
+        await f("https://api.test/exchanges?a=1", { method: "POST", body: "{}" });
+        expect(mockFetch.mock.calls.at(-1)?.[0]).toBe("https://api.test/exchanges?a=1");
+    });
+});
+
+/**
+ * The "does not wedge" test stalls the fetch, never the signing. A stall inside
+ * createPaymentPayload wedges the queue permanently — the exact failure the
+ * bound exists to prevent — and no test observed it.
+ */
+describe("signing is bounded too", () => {
+    it("times out a stalled signature instead of wedging the queue", async () => {
+        vi.useFakeTimers();
+        stallSigning = true;
+        const f = createX402Fetch(`0x${"11".repeat(32)}`);
+        const first = f("https://api.test/stalls").then(() => "resolved", (e: Error) => e.message);
+        await vi.advanceTimersByTimeAsync(180_000);
+        expect(await first).toMatch(/timed out.*signing/i);
+
+        stallSigning = false;
+        const second = f("https://api.test/after").then((r) => r.status, (e: Error) => e.message);
+        await vi.advanceTimersByTimeAsync(120_000);
+        expect(await second).toBe(200);
     });
 });

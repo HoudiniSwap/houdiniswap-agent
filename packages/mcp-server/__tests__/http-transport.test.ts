@@ -123,10 +123,46 @@ describe("HTTP transport hardening", () => {
         expect(results.every((s) => s === 405)).toBe(true);
     });
 
-    // The wallet-spending surface must not be reachable off-box by default.
-    it("binds loopback only", async () => {
+    /**
+     * This previously fetched 127.0.0.1 and asserted it answered — which
+     * succeeds under 0.0.0.0 too, so the test named "binds loopback only" could
+     * not observe the property it claimed. Same defect class as an earlier test
+     * that asserted `total >= 0` on a filter that did nothing.
+     *
+     * It now inspects the listening socket, and confirms a non-loopback address
+     * on this host is refused. That matters because /mcp has no authentication
+     * and every call spends the configured wallet.
+     */
+    it("binds loopback only — checked at the socket, not by fetching localhost", async () => {
+        const { execSync } = await import("node:child_process");
+        const listening = execSync("ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null", { encoding: "utf8" })
+            .split("\n")
+            .filter((l) => l.includes(`:${PORT}`));
+
+        expect(listening.length, `nothing listening on ${PORT}`).toBeGreaterThan(0);
+        for (const line of listening) {
+            // ss columns: State Recv-Q Send-Q Local:Port Peer:Port — the peer
+            // column is always "0.0.0.0:*" for a listener, so only the LOCAL
+            // address can be inspected. Matching the whole line reads the peer
+            // column and fails on a correctly-bound socket.
+            const local = line.trim().split(/\s+/)[3] ?? "";
+            expect(local, `bound to ${local}, expected loopback`).not.toMatch(/^(0\.0\.0\.0|\*|::):/);
+            expect(local, `bound to ${local}`).toMatch(/^(127\.0\.0\.1|\[::1\]):/);
+        }
+    });
+
+    it("is unreachable on a non-loopback address of this host", async () => {
+        const { networkInterfaces } = await import("node:os");
+        const external = Object.values(networkInterfaces())
+            .flat()
+            .find((i) => i && i.family === "IPv4" && !i.internal)?.address;
+        if (!external) return; // no external interface on this machine
+
         await expect(
-            fetch(`http://127.0.0.1:${PORT}/mcp`, { method: "GET" }).then((r) => r.status),
-        ).resolves.toBe(405);
+            fetch(`http://${external}:${PORT}/mcp`, {
+                method: "GET",
+                signal: AbortSignal.timeout(3000),
+            }),
+        ).rejects.toThrow();
     });
 });

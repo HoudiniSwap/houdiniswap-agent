@@ -136,17 +136,29 @@ jobs:
           # dependents ship requiring a version that does not exist — every
           # `npx -y @houdiniswap/mcp-server` then fails with ERR_MODULE_NOT_FOUND
           # while the workflow stays green.
+          # The registry's read path lags its write path. Checking immediately
+          # after publishing agent-shared reported the version as missing 0.35s
+          # after npm confirmed it published, which failed a correct release.
+          # Retry before concluding the range is genuinely unsatisfiable.
           assert_shared_range_resolvable() {
-            local dir="$1" range
+            local dir="$1" range attempt
             range=$(node -p "require('./$dir/package.json').dependencies['@houdiniswap/agent-shared'] || ''")
             [ -n "$range" ] || return 0
-            if ! npm view "@houdiniswap/agent-shared@$range" version >/dev/null 2>&1; then
+
+            for attempt in 1 2 3 4 5 6; do
+              if npm view "@houdiniswap/agent-shared@$range" version >/dev/null 2>&1; then
+                echo "· $dir's agent-shared@$range resolves (attempt $attempt)"
+                return 0
+              fi
+              [ "$attempt" -lt 6 ] && sleep 10
+            done
+
+            if true; then
               echo "✗ $dir depends on @houdiniswap/agent-shared@$range, which nothing on the registry satisfies." >&2
               echo "  Publishing it would ship a package whose dependency cannot be installed." >&2
               echo "  A shared version bump was probably lost while the range bump survived." >&2
               exit 1
             fi
-            echo "· $dir's agent-shared@$range resolves"
           }
 
           publish_if_changed packages/shared
