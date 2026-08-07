@@ -185,6 +185,36 @@ describe("signing page", () => {
         }
     });
 
+    // Both of these were found by signing a real swap, not by reading the code.
+    it("sends an explicit gas limit rather than letting the wallet guess", () => {
+        const html = renderSignPage(TX, 8453, "H1", "t".repeat(64));
+        // match the calls, not prose mentioning them
+        const estimateAt = html.indexOf('method: "eth_estimateGas"');
+        const sendAt = html.indexOf('method: "eth_sendTransaction"');
+        expect(estimateAt).toBeGreaterThan(-1);
+        expect(sendAt).toBeGreaterThan(-1);
+        // the estimate must be requested before the send, or there is nothing to pass
+        expect(estimateAt).toBeLessThan(sendAt);
+        expect(html).toMatch(/params:\s*\[\{\s*\.\.\.call,\s*gas\s*\}\]/);
+    });
+
+    // Evaluates the helper exactly as shipped: the API sends decimal strings,
+    // eth_sendTransaction wants hex, and "0" hides the difference.
+    it("converts the value to a hex quantity", () => {
+        const html = renderSignPage(TX, 8453, "H1", "t".repeat(64));
+        const src = /const toQuantity = \(v\) => \{[\s\S]*?\n      \};/.exec(html)?.[0];
+        expect(src, "toQuantity not found in the page").toBeTruthy();
+        const toQuantity = new Script(`${src} toQuantity`).runInNewContext() as (v: unknown) => string;
+
+        expect(toQuantity("2740000000000000")).toBe("0x9bc03f6af4000");
+        expect(toQuantity("0")).toBe("0x0");
+        expect(toQuantity(undefined)).toBe("0x0");
+        expect(toQuantity("")).toBe("0x0");
+        expect(toQuantity("0x00")).toBe("0x00");
+        // the bug: a decimal string read as hex is ~4000x the intended amount
+        expect(toQuantity("2740000000000000")).not.toBe("2740000000000000");
+    });
+
     it("summarises what is being signed", () => {
         const rows = summarise(TX, 8453);
         const byLabel = Object.fromEntries(rows.map((r) => [r.label, r.value]));

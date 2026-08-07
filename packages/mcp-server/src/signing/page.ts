@@ -192,10 +192,36 @@ export const renderSignPage = (
         await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: want }] });
       }
 
+      // The API gives value as a decimal string; eth_sendTransaction wants a
+      // hex quantity. "0" is the same either way, which is why this survived
+      // an ERC-20 approval and would have mis-sent a native-value swap.
+      const toQuantity = (v) => {
+        if (v === undefined || v === null || v === "") return "0x0";
+        const s = String(v);
+        return s.startsWith("0x") ? s : "0x" + BigInt(s).toString(16);
+      };
+      const call = { from: accounts[0], to: tx.to, data: tx.data, value: toQuantity(tx.value) };
+
+      // Estimate explicitly rather than letting the wallet fill it in. When
+      // MetaMask's own estimate does not arrive it substitutes a block-sized
+      // default — 140,000,000 against Base's 25,000,000 per-tx cap — and the
+      // RPC rejects the send after the user has already approved it.
+      say("Estimating gas…");
+      let gas;
+      try {
+        const est = await window.ethereum.request({ method: "eth_estimateGas", params: [call] });
+        gas = "0x" + ((BigInt(est) * 12n) / 10n).toString(16);
+      } catch (err) {
+        const why = (err && (err.data && err.data.message || err.message)) || "unknown error";
+        say("This swap would fail on-chain, so nothing was sent: " + why, "bad");
+        await report({ error: "gas estimation failed: " + why });
+        return;
+      }
+
       say("Confirm the transaction in your wallet…");
       const txHash = await window.ethereum.request({
         method: "eth_sendTransaction",
-        params: [{ from: accounts[0], to: tx.to, data: tx.data, value: tx.value || "0x0" }],
+        params: [{ ...call, gas }],
       });
 
       await report({ txHash });
