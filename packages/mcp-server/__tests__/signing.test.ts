@@ -280,6 +280,36 @@ describe("signing server", () => {
         expect((await post(b.url, { txHash: `0x${"b".repeat(64)}` })).status).toBe(200);
     });
 
+    // Those 32 bytes are the only access control there is: without the token
+    // the route 404s. A counter would keep every other test green while letting
+    // any local process enumerate /sign/0…01, read the pending transaction and
+    // resolve it.
+    it("issues unguessable tokens", async () => {
+        const s = make();
+        const seen = new Set<string>();
+        for (let i = 0; i < 50; i++) {
+            const { token } = await s.request(`H${i}`, TX, 8453, later());
+            expect(token).toMatch(/^[0-9a-f]{64}$/);
+            seen.add(token);
+        }
+        expect(seen.size).toBe(50);
+        // no two share a prefix, which a counter or a timestamp would
+        expect(new Set([...seen].map((t2) => t2.slice(0, 8))).size).toBe(50);
+    });
+
+    // The agent polls after the fact. If a resolved entry is swept the moment
+    // its order expires, or expiry overwrites the status, a completed signature
+    // reads back as unknown and the hash is lost.
+    it("keeps a signed result readable after the order expires", async () => {
+        const s = make();
+        const { url, token } = await s.request("H1", TX, 8453, Date.now() + 60);
+        expect((await post(url, { txHash: HASH })).status).toBe(200);
+        await new Promise((r) => setTimeout(r, 120)); // past expiry
+
+        expect(s.status(token)?.status).toBe("signed");
+        expect(s.status(token)?.txHash).toBe(HASH);
+    });
+
     it("caps the request body", async () => {
         const s = make();
         const { url, token } = await s.request("H1", TX, 8453, later());
