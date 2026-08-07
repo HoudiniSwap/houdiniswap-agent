@@ -193,10 +193,12 @@ describe("AI SDK tools", () => {
     describe("dexChainSignatures", () => {
         it("posts the whole signature chain", async () => {
             mockClient.mockPost("/dex/chainSignatures", { signatures: [] });
+            // previousSignature is the wallet's signature OBJECT, not a hex
+            // string — the whole point of the chain is carrying `key` forward.
             const args = {
                 quoteId: "q1",
                 addressFrom: "0xabc",
-                previousSignature: "0xsig",
+                previousSignature: { signature: `0x${"1".repeat(130)}`, key: "permit-0" },
                 signatureKey: "k1",
                 signatureStep: 1,
             };
