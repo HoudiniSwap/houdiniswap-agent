@@ -5,6 +5,13 @@ import { asToolResult } from "../shape.js";
 import { SigningServer } from "../signing/server.js";
 import type { SignableTransaction } from "../signing/page.js";
 
+/** The token as GET /orders/:id returns it, before any shaping. */
+interface RawToken {
+    symbol?: string;
+    chainId?: number;
+    chainData?: { chainId?: number };
+}
+
 /**
  * Browser signing for DEX swaps, so a user is never asked to paste a private key
  * into a script. See docs/local-signing.md.
@@ -48,7 +55,13 @@ export const registerSigningTools = (server: McpServer, client: HoudiniClient) =
                 });
             }
 
-            const chainId = (order as { inToken?: { chainId?: number } }).inToken?.chainId;
+            // GET /orders/:id nests the chain under chainData; the shaped order
+            // returned by createExchange flattens chainId onto the token. This
+            // reads the raw endpoint, so chainData comes first — getting it the
+            // other way round made every request fail with "could not determine
+            // the chain", and the mocked order in the tests hid it.
+            const inToken = (order as { inToken?: RawToken }).inToken;
+            const chainId = inToken?.chainData?.chainId ?? inToken?.chainId;
             if (typeof chainId !== "number") {
                 return asToolResult({ error: `Could not determine the chain for order ${houdiniId}.` });
             }
@@ -57,11 +70,14 @@ export const registerSigningTools = (server: McpServer, client: HoudiniClient) =
             // So the page can show what the swap does, not just where the
             // calldata points. Every router encodes its swap differently, so
             // these come from the order rather than from decoding `data`.
+            // inSymbol/outSymbol hold token ids on DEX orders; the embedded
+            // token documents carry the real ticker, so prefer those.
+            const outToken = (order as { outToken?: RawToken }).outToken;
             const pending = await signer.request(houdiniId, tx, chainId, expiresAt, {
                 inAmount: order.inAmount,
-                inSymbol: order.inSymbol,
+                inSymbol: inToken?.symbol ?? order.inSymbol,
                 outAmount: order.outAmount,
-                outSymbol: order.outSymbol,
+                outSymbol: outToken?.symbol ?? order.outSymbol,
                 receiverAddress: order.receiverAddress,
             });
 
