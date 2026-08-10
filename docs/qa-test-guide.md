@@ -17,6 +17,35 @@ figures in T4 drift.
 
 ---
 
+## Quick install
+
+**1. Fund a wallet.** Put **$5–10 of USDC on Base** in a throwaway wallet. Every API
+call is paid per request — without a funded wallet, every tool returns 402. Add ~$2
+of ETH only if you will test DEX swaps, since you broadcast those yourself.
+
+**2. Install.**
+
+```
+/plugin marketplace add HoudiniSwap/houdiniswap-agent
+/plugin install houdiniswap@houdiniswap
+```
+
+Claude Code prompts for the wallet private key. Paste it with or without the `0x` —
+both work. For Claude Desktop or Cursor, see [Other clients](#other-clients).
+
+**3. Fully quit and reopen.** Not `/reload-plugins` — that leaves the old server
+running with old code. This is the single most common source of "it's broken"; see
+[the trap below](#the-trap-that-will-waste-your-afternoon).
+
+**4. Check it works.** Ask: *"find USDC on Base"*. You should get the token with its
+contract address and price. A 402 means the wallet is not funded, or the USDC is not
+on Base.
+
+Then talk to it — *"swap 20 USDC on Base to SOL"* — and it walks you through quotes,
+the order, and the deposit address.
+
+---
+
 ## Before you start
 
 ### A funded wallet
@@ -58,17 +87,10 @@ amounts themselves.
 
 ---
 
-## Install
+## Other clients
 
-### Claude Code — plugin (recommended)
-
-Installs the swap-agent skill *and* wires up the MCP server. Claude Code prompts for
-the wallet key when you enable it.
-
-```
-/plugin marketplace add HoudiniSwap/houdiniswap-agent
-/plugin install houdiniswap@houdiniswap
-```
+The plugin route is in [Quick install](#quick-install) above — it brings the
+swap-agent skill *and* the MCP server. The routes below are for everything else.
 
 ### Claude Code — MCP server only
 
