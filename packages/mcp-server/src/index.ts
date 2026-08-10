@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createMcpServer } from "./server.js";
+import { SigningServer } from "./signing/server.js";
 import { HoudiniClient } from "@houdiniswap/agent-shared";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { getAuthConfig } from "./auth.js";
@@ -47,8 +48,30 @@ const main = async () => {
                 });
         });
 
+        // One signer for the process. A fresh McpServer is built per request
+        // (a shared one served exactly one request), so a signer created inside
+        // it would be thrown away with it and the token from dexSignRequest
+        // would be unknown to the dexSignStatus that follows.
+        //
+        // Off entirely when not on loopback: the signing page is safe because
+        // only the person sitting at that machine can open it. Served from a
+        // host the caller does not control, it is a page on someone else's
+        // computer, which is no use to them and a hazard to the operator.
+        const signingHost = process.env.HOUDINI_HTTP_HOST || "127.0.0.1";
+        const signingEnabled = signingHost === "127.0.0.1" || signingHost === "localhost";
+        const sharedSigner = signingEnabled ? new SigningServer() : undefined;
+        if (!signingEnabled) {
+            console.error(
+                `Browser signing is disabled: HTTP transport is bound to ${signingHost}, not loopback. ` +
+                    "Use the stdio transport for local signing.",
+            );
+        }
+
         app.all("/mcp", async (req, res) => {
-            const requestServer = createMcpServer(client);
+            const requestServer = createMcpServer(client, {
+                signer: sharedSigner,
+                signing: signingEnabled,
+            });
             const requestTransport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
             res.on("close", () => {
                 requestTransport.close().catch(() => {});

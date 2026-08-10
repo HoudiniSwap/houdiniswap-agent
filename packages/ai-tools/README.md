@@ -42,6 +42,19 @@ Unlike [`@houdiniswap/mcp-server`](https://www.npmjs.com/package/@houdiniswap/mc
 tools return the **raw API response** with no shaping. A single unfiltered `getQuote` can return
 150+ quotes, so consider trimming results before they reach the model's context.
 
+### No browser signing here — deliberately
+
+`mcp-server` has `dexSignRequest`/`dexSignStatus`, which open a page on `127.0.0.1` for the user to
+sign a swap in their own wallet. They are **not** ported here, and should not be.
+
+That design is safe only because an MCP server runs on the same machine as the person using it:
+loopback is what makes the page unreachable by anyone else. These tools usually run on a server,
+where the operator and the end user are different people — a signer bound there would be reachable
+by whoever controls the host and by nobody the transaction actually belongs to.
+
+If you need users to sign, hand the transaction to your own frontend and let their wallet sign it
+there. The unsigned transaction is on the order's `metadata`.
+
 ## Auth
 
 ```ts

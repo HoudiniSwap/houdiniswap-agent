@@ -139,14 +139,91 @@ describe("AI SDK tools", () => {
         });
     });
 
+    /**
+     * These assert the whole body with toEqual, not method and path alone.
+     *
+     * What they do NOT do is catch a schema rename. Every tool forwards its
+     * args straight to client.post, and execute() bypasses inputSchema (the AI
+     * SDK validates only on the model-call path), so a test that hands in
+     * `addressFrom` proves only that `addressFrom` survives the trip. Renaming
+     * the schema to `address` leaves these green — parity.test.ts is what
+     * guards the names, by asserting the schema shape itself.
+     *
+     * What they do catch is the tool mangling the body between args and wire:
+     * a dropped field, a silently added one, a value rewritten in passing. The
+     * old dexApprove test caught neither, since it passed `address` — the very
+     * parameter that 422'd every DEX call — and asserted only method and path.
+     */
     describe("dexApprove", () => {
-        it("calls POST /dex/approve", async () => {
-            mockClient.mockPost("/dex/approve", { txData: "0x..." });
+        it("posts addressFrom, not address", async () => {
+            mockClient.mockPost("/dex/approve", { approvals: [], signatures: [] });
             await tools.dexApprove.execute(
-                { quoteId: "q1", address: "0xabc" },
+                { quoteId: "q1", addressFrom: "0xabc" },
                 { toolCallId: "t1", messages: [] },
             );
             expect(mockClient.calls[0]).toMatchObject({ method: "POST", path: "/dex/approve" });
+            expect(mockClient.calls[0].data).toEqual({ quoteId: "q1", addressFrom: "0xabc" });
+        });
+    });
+
+    describe("dexCheckAllowance", () => {
+        it("posts addressFrom, not address", async () => {
+            mockClient.mockPost("/dex/allowance", true);
+            await tools.dexCheckAllowance.execute(
+                { quoteId: "q1", addressFrom: "0xabc" },
+                { toolCallId: "t1", messages: [] },
+            );
+            expect(mockClient.calls[0]).toMatchObject({ method: "POST", path: "/dex/allowance" });
+            expect(mockClient.calls[0].data).toEqual({ quoteId: "q1", addressFrom: "0xabc" });
+        });
+    });
+
+    describe("dexConfirmTx", () => {
+        it("posts the order id, not a quoteId", async () => {
+            mockClient.mockPost("/dex/confirmTx", true);
+            await tools.dexConfirmTx.execute(
+                { id: "H1", txHash: `0x${"a".repeat(64)}` },
+                { toolCallId: "t1", messages: [] },
+            );
+            expect(mockClient.calls[0]).toMatchObject({ method: "POST", path: "/dex/confirmTx" });
+            expect(mockClient.calls[0].data).toEqual({ id: "H1", txHash: `0x${"a".repeat(64)}` });
+        });
+    });
+
+    describe("dexChainSignatures", () => {
+        it("posts the whole signature chain", async () => {
+            mockClient.mockPost("/dex/chainSignatures", { signatures: [] });
+            // previousSignature is the wallet's signature OBJECT, not a hex
+            // string — the whole point of the chain is carrying `key` forward.
+            const args = {
+                quoteId: "q1",
+                addressFrom: "0xabc",
+                previousSignature: { signature: `0x${"1".repeat(130)}`, key: "permit-0" },
+                signatureKey: "k1",
+                signatureStep: 1,
+            };
+            await tools.dexChainSignatures.execute(args, { toolCallId: "t1", messages: [] });
+            expect(mockClient.calls[0]).toMatchObject({ method: "POST", path: "/dex/chainSignatures" });
+            expect(mockClient.calls[0].data).toEqual(args);
+        });
+    });
+
+    describe("getOrders", () => {
+        // dateFrom/dateTo silently disabled this filter; the API takes from/to.
+        it("sends the API's from/to date range", async () => {
+            mockClient.mockGet("/orders", { orders: [], total: 0 });
+            await tools.getOrders.execute(
+                { from: "2026-08-01T00:00:00.000Z", to: "2026-08-07T00:00:00.000Z", status: 4 },
+                { toolCallId: "t1", messages: [] },
+            );
+            expect(mockClient.calls[0].path).toBe("/orders");
+            expect(mockClient.calls[0].data).toMatchObject({
+                from: "2026-08-01T00:00:00.000Z",
+                to: "2026-08-07T00:00:00.000Z",
+                status: 4,
+            });
+            expect(mockClient.calls[0].data).not.toHaveProperty("dateFrom");
+            expect(mockClient.calls[0].data).not.toHaveProperty("dateTo");
         });
     });
 
