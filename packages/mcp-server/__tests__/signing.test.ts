@@ -221,11 +221,15 @@ describe("signing server", () => {
     });
 
     // Defence in depth for whatever the next unrenderable field turns out to
-    // be. `data` is filtered by dexSignRequest, so this reaches the server the
-    // way a future gap would: through request() directly.
+    // be. `to` is filtered by both request tools, so this reaches the server
+    // the way a future gap would: through request() directly.
+    //
+    // This used to omit `data` instead. That stopped throwing when deposits
+    // made calldata optional — a native transfer has none — so the trigger
+    // moved to `to`, which no transaction can do without.
     it("answers 500 and stays alive when rendering throws", async () => {
         const s = make();
-        const broken = { to: TX.to, value: "0" } as unknown as typeof TX;
+        const broken = { value: "0" } as unknown as typeof TX;
         const { url } = await s.request("H1", broken, 8453, later());
         expect((await fetch(url)).status).toBe(500);
         // the process is still here, and so is the listener

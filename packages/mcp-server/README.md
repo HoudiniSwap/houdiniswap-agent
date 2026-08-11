@@ -52,12 +52,14 @@ channel, and the server never starts.
 
 `getTokens` · `getChains` · `getSwapProviders` · `getMinMax` · `getQuote` · `createExchange` ·
 `getOrder` · `getOrders` · `dexApprove` · `dexCheckAllowance` · `dexConfirmTx` ·
-`dexChainSignatures` · `dexSignRequest` · `dexSignStatus` · `swap`
+`dexChainSignatures` · `dexSignRequest` · `cexDepositRequest` · `dexSignStatus` · `swap`
 
 `dexSignRequest` serves a page on `127.0.0.1` and hands the swap to the user's own browser wallet,
 so no private key is ever pasted into anything. EVM only. It signs the swap, not the approval,
-which happens before an order exists. Disabled when the HTTP transport is bound off-loopback,
-since a page on the server's host is no use to a remote caller.
+which happens before an order exists. `cexDepositRequest` serves the same page for a CEX order's
+deposit, with network, address and amount prefilled, so the address is never copied by hand onto
+the wrong chain. Both are disabled when the HTTP transport is bound off-loopback, since a page on
+the server's host is no use to a remote caller.
 
 Reads cost $0.0001, quotes $0.001, `createExchange` and `dexConfirmTx` $0.01 each. A standard swap
 runs about $0.012; a DEX swap about $0.022, because it pays the exchange tier twice.

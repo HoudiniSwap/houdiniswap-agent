@@ -4,13 +4,20 @@ import { z } from "zod";
 import { asToolResult } from "../shape.js";
 import { SigningServer } from "../signing/server.js";
 import type { SignableTransaction } from "../signing/page.js";
+import { erc20TransferData, isEvmAddress, toBaseUnits } from "../units.js";
 
 /** The token as GET /orders/:id returns it, before any shaping. */
 interface RawToken {
     symbol?: string;
+    address?: string | null;
+    decimals?: number;
     chainId?: number;
-    chainData?: { chainId?: number };
+    chainData?: { chainId?: number; kind?: string };
 }
+
+/** GET /orders/:id nests the chain under chainData; the shaped order flattens it. */
+const chainIdOf = (token: RawToken | undefined): number | undefined =>
+    token?.chainData?.chainId ?? token?.chainId;
 
 /**
  * Browser signing for DEX swaps, so a user is never asked to paste a private key
@@ -87,7 +94,7 @@ export const registerSigningTools = (
             // other way round made every request fail with "could not determine
             // the chain", and the mocked order in the tests hid it.
             const inToken = (order as { inToken?: RawToken }).inToken;
-            const chainId = inToken?.chainData?.chainId ?? inToken?.chainId;
+            const chainId = chainIdOf(inToken);
             if (typeof chainId !== "number") {
                 return asToolResult({ error: `Could not determine the chain for order ${houdiniId}.` });
             }
@@ -121,8 +128,120 @@ export const registerSigningTools = (
     );
 
     server.tool(
+        "cexDepositRequest",
+        "Open a local page in the user's browser to send a CEX order's deposit from their own wallet. Use this instead of asking the user to copy a deposit address and amount by hand. EVM chains only. Costs one status call ($0.0001) to read the order; the send itself is local and free.",
+        {
+            houdiniId: z.string().describe("The Houdini order ID from createExchange"),
+        },
+        async ({ houdiniId }) => {
+            const order = await client.get<
+                Order & { isDex?: boolean; expires?: string; status?: number }
+            >(`/orders/${encodeURIComponent(houdiniId)}`);
+
+            if (order?.isDex) {
+                return asToolResult({
+                    error: `Order ${houdiniId} is a DEX order, which moves funds with the swap transaction itself. Use dexSignRequest instead — its depositAddress is only an echo of the sender.`,
+                });
+            }
+
+            const depositAddress = order?.depositAddress;
+            if (!isEvmAddress(depositAddress)) {
+                return asToolResult({
+                    error: depositAddress
+                        ? `Order ${houdiniId} deposits to ${depositAddress}, which is not an EVM address. This page sends through window.ethereum, so it covers EVM chains only — give the user the deposit address to send from their own wallet.`
+                        : `Order ${houdiniId} carries no deposit address.`,
+                });
+            }
+
+            // Only while the order is still waiting. Past that the exchange has
+            // already seen a deposit, and handing over a second page invites a
+            // second send that no one can reverse.
+            if (typeof order?.status === "number" && order.status > 0) {
+                return asToolResult({
+                    error: `Order ${houdiniId} is past waiting for a deposit (status ${order.status}). Do not send again — read the order with getOrder to see where it is.`,
+                });
+            }
+
+            const inToken = (order as { inToken?: RawToken }).inToken;
+            const chainId = chainIdOf(inToken);
+            if (typeof chainId !== "number") {
+                return asToolResult({ error: `Could not determine the chain for order ${houdiniId}.` });
+            }
+            const kind = inToken?.chainData?.kind;
+            if (kind !== undefined && kind !== "evm") {
+                return asToolResult({
+                    error: `Order ${houdiniId} deposits on a ${kind} chain, which this page cannot sign for. Give the user the deposit address and amount to send from their own wallet.`,
+                });
+            }
+
+            if (typeof order?.inAmount !== "number" || !(order.inAmount > 0)) {
+                return asToolResult({ error: `Order ${houdiniId} has no deposit amount to send.` });
+            }
+            // Refusing beats defaulting to 18. A token sent at the wrong scale
+            // is off by orders of magnitude, and the transfer cannot be undone.
+            if (typeof inToken?.decimals !== "number") {
+                return asToolResult({
+                    error: `Order ${houdiniId} does not say how many decimals ${inToken?.symbol ?? "the deposit token"} has, so the amount cannot be built safely. Have the user send it manually.`,
+                });
+            }
+
+            const amount = toBaseUnits(order.inAmount, inToken.decimals);
+            if (amount === undefined) {
+                return asToolResult({
+                    error: `Deposit amount ${order.inAmount} does not fit ${inToken.decimals} decimals exactly. Refusing to round it — have the user send ${order.inAmount} manually to ${depositAddress}.`,
+                });
+            }
+
+            // `address: null` is how the API marks the chain's native coin, and
+            // a native deposit is a plain transfer rather than a token call.
+            const contract = inToken.address ?? undefined;
+            let tx: SignableTransaction;
+            if (contract === undefined) {
+                tx = { to: depositAddress, value: amount };
+            } else {
+                const data = isEvmAddress(contract)
+                    ? erc20TransferData(depositAddress, amount)
+                    : undefined;
+                if (!data) {
+                    return asToolResult({
+                        error: `Could not build an ERC-20 transfer for order ${houdiniId} (token contract ${String(contract)}).`,
+                    });
+                }
+                tx = { to: contract, data, value: "0" };
+            }
+
+            // An unparseable `expires` must not become NaN: every comparison
+            // against it is false, so the entry would never expire and the page
+            // would stay live indefinitely.
+            const declared = order.expires ? Date.parse(order.expires) : Number.NaN;
+            const expiresAt = Number.isNaN(declared) ? Date.now() + 15 * 60_000 : declared;
+
+            const outToken = (order as { outToken?: RawToken }).outToken;
+            const pending = await signer.request(houdiniId, tx, chainId, expiresAt, {
+                inAmount: order.inAmount,
+                inSymbol: inToken.symbol ?? order.inSymbol,
+                outAmount: order.outAmount,
+                outSymbol: outToken?.symbol ?? order.outSymbol,
+                receiverAddress: order.receiverAddress,
+                depositAddress,
+            });
+
+            return asToolResult({
+                url: pending.url,
+                token: pending.token,
+                expiresAt: new Date(expiresAt).toISOString(),
+                chainId,
+                instructions:
+                    "Give the user this URL to open in the browser where their wallet extension is installed. " +
+                    "Their wallet will show its own confirmation. Then poll dexSignStatus with the token. " +
+                    "A CEX deposit needs no dexConfirmTx — the exchange credits it itself once the transfer confirms; follow the order with getOrder.",
+            });
+        },
+    );
+
+    server.tool(
         "dexSignStatus",
-        "Check whether the user has signed a transaction requested via dexSignRequest. Poll this after giving them the URL. Free.",
+        "Check whether the user has signed a transaction requested via dexSignRequest or cexDepositRequest. Poll this after giving them the URL. Free.",
         {
             token: z.string().describe("The token returned by dexSignRequest"),
         },
@@ -155,7 +274,16 @@ export const registerSigningTools = (
                 ...(entry.txHash ? { txHash: entry.txHash } : {}),
                 ...reported,
                 ...(entry.status === "signed"
-                    ? { next: `Call dexConfirmTx with id "${entry.houdiniId}" and this txHash.` }
+                    ? {
+                          // A CEX deposit has no transaction to confirm: the
+                          // exchange watches its own address and credits the
+                          // order itself. Sending the agent to dexConfirmTx
+                          // there would charge the exchange tier ($0.01) for a
+                          // call that does not apply to the order.
+                          next: entry.order.depositAddress
+                              ? `Deposit sent. The exchange credits it once the transfer confirms — follow the order with getOrder using id "${entry.houdiniId}". Do not call dexConfirmTx; that is for DEX orders.`
+                              : `Call dexConfirmTx with id "${entry.houdiniId}" and this txHash.`,
+                      }
                     : {}),
             });
         },

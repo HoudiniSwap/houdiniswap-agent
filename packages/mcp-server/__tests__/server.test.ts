@@ -70,6 +70,7 @@ const EXPECTED_TOOLS = [
     "dexChainSignatures",
     "dexSignRequest",
     "dexSignStatus",
+    "cexDepositRequest",
     "swap",
 ];
 
