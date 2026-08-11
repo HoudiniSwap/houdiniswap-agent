@@ -54,6 +54,17 @@ const CHAIN_NAMES: Record<number, string> = {
     43114: "Avalanche",
 };
 
+/** Only for naming the shortfall in the balance check; falls back to "funds". */
+const NATIVE_SYMBOLS: Record<number, string> = {
+    1: "ETH",
+    10: "ETH",
+    56: "BNB",
+    137: "POL",
+    8453: "ETH",
+    42161: "ETH",
+    43114: "AVAX",
+};
+
 /**
  * A summary the user can check *before* the wallet opens. The wallet shows its
  * own review on top of this; the point here is that the amounts and addresses
@@ -159,7 +170,13 @@ export const renderSignPage = (
     // two line separators that are literal in JSON but terminators in JS —
     // makes the payload safe to inline. Caught by its own test, having written
     // the bug first.
-    const payload = JSON.stringify({ tx, chainId, token, houdiniId })
+    const payload = JSON.stringify({
+        tx,
+        chainId,
+        token,
+        houdiniId,
+        native: NATIVE_SYMBOLS[chainId] ?? "funds",
+    })
         .replace(/</g, "\\u003c")
         .replace(/>/g, "\\u003e")
         .replace(/&/g, "\\u0026")
@@ -214,7 +231,7 @@ export const renderSignPage = (
 </main>
 <script>
 (() => {
-  const { tx, chainId, token } = ${payload};
+  const { tx, chainId, token, native } = ${payload};
   const btn = document.getElementById("go");
   const out = document.getElementById("status");
   const say = (msg, cls) => { out.textContent = msg; out.className = cls || ""; };
@@ -277,6 +294,32 @@ export const renderSignPage = (
         say("This swap would fail on-chain, so nothing was sent: " + why, "bad");
         await report({ error: "gas estimation failed: " + why });
         return;
+      }
+
+      // Check the balance covers value + gas before the wallet opens. Two real
+      // cases land here: a native CEX deposit is sized to the order, not to the
+      // wallet, so a user who deposits "everything" cannot pay gas; and a
+      // cross-chain swap adds the bridge fee *on top* of the order's inAmount,
+      // so \`value\` exceeds the amount the user was quoted. Both otherwise fail
+      // inside the wallet, after the user has read and approved everything.
+      try {
+        const [balance, gasPrice] = await Promise.all([
+          window.ethereum.request({ method: "eth_getBalance", params: [accounts[0], "latest"] }),
+          window.ethereum.request({ method: "eth_gasPrice", params: [] }),
+        ]);
+        const need = BigInt(call.value) + BigInt(gas) * BigInt(gasPrice);
+        if (need > BigInt(balance)) {
+          const short = Number(need - BigInt(balance)) / 1e18;
+          const msg =
+            "Not enough " + native + " to cover this transaction plus gas — short by about " +
+            short.toFixed(8) + " " + native + ". Nothing was sent.";
+          say(msg, "bad");
+          await report({ error: msg });
+          return;
+        }
+      } catch {
+        // A wallet that will not answer eth_getBalance/eth_gasPrice is no reason
+        // to block a transaction that already estimated cleanly.
       }
 
       say("Confirm the transaction in your wallet…");
