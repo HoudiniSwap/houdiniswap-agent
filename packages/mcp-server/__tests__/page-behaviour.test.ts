@@ -104,6 +104,8 @@ describe("what the page actually hands the wallet", () => {
         eth_chainId: "0x2105", // Base, already correct
         eth_estimateGas: "0x30d40", // 200000
         eth_sendTransaction: `0x${"a".repeat(64)}`,
+        eth_getBalance: "0x2386f26fc10000", // 1e16 wei — comfortably covers TX
+        eth_gasPrice: "0x5b8d80", // 6_000_000 wei
     };
 
     // The bug this exists for: the API sends value as a decimal string and
@@ -179,6 +181,42 @@ describe("what the page actually hands the wallet", () => {
         const report = h.reports[0] as { error: string };
         expect(report.error).toContain("gas estimation failed");
         expect(h.status()).toContain("would fail on-chain");
+    });
+
+    // A native CEX deposit is sized to the order, not to the wallet, so a user
+    // depositing "everything" has nothing left for gas. A cross-chain swap is
+    // the same shape: the bridge fee rides on top of value. Measured live —
+    // a 0.0059 ETH order carried value 0.005929… and left 140k gas affordable
+    // against a 480k requirement, which fails inside the wallet.
+    it("refuses when the balance cannot cover value plus gas", async () => {
+        const h = load(page(), {
+            ...happy,
+            eth_getBalance: "0x9bc03f6af4000", // exactly the value, nothing for gas
+        });
+        await h.click();
+        expect(h.calls.map((c) => c.method)).not.toContain("eth_sendTransaction");
+        const report = h.reports[0] as { error: string };
+        expect(report.error).toContain("short by");
+        expect(h.status()).toContain("ETH"); // names the chain's own coin
+    });
+
+    it("sends when the balance covers value plus gas", async () => {
+        const h = load(page(), happy);
+        await h.click();
+        expect(h.calls.map((c) => c.method)).toContain("eth_sendTransaction");
+    });
+
+    // The check is a courtesy, not a gate: a wallet that will not answer these
+    // must not block a transaction that already estimated cleanly.
+    it("still sends when the wallet refuses to report a balance", async () => {
+        const h = load(page(), {
+            ...happy,
+            eth_getBalance: () => {
+                throw new Error("unsupported method");
+            },
+        });
+        await h.click();
+        expect(h.calls.map((c) => c.method)).toContain("eth_sendTransaction");
     });
 
     it("reports a user rejection rather than leaving the agent polling", async () => {

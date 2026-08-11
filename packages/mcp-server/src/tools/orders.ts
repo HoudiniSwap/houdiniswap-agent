@@ -23,7 +23,11 @@ export const registerOrderTools = (server: McpServer, client: HoudiniClient) => 
 
     server.tool(
         "getOrders",
-        "List swap orders with optional filters. Requires API key authentication.",
+        // It used to say "requires API key authentication". It does not: an x402
+        // caller reaches it too, and the claim made the agent skip a working tool.
+        // Deliberately no promise about whose orders come back — see the note on
+        // x402 order scoping in docs/qa-test-guide.md.
+        "List swap orders with optional filters. Works with API-key or x402 authentication.",
         // Names mirror the API's query parameters exactly. The date filter used
         // to be sent as `dateFrom`/`dateTo`, which the API does not accept — it
         // takes `from`/`to` — so it was silently ignored and a request for

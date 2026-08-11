@@ -1,4 +1,4 @@
-# Local browser signing for DEX swaps
+# Local browser signing for DEX swaps and CEX deposits
 
 > Shipped in `@houdiniswap/mcp-server` 0.1.11 and hardened since. This describes
 > what the code does; where it once read as a proposal, it now reads as a record.
@@ -55,8 +55,10 @@ the interface they already trust, rather than in ours.
 
 ## Tools
 
-Two tools rather than one blocking call — a browser signature can take minutes,
-and an MCP tool that blocks that long is indistinguishable from a hang.
+Request and status are separate tools rather than one blocking call — a browser
+signature can take minutes, and an MCP tool that blocks that long is
+indistinguishable from a hang. Both request tools share one status tool and one
+listener.
 
 ### `dexSignRequest({ houdiniId })`
 
@@ -83,6 +85,39 @@ Free — answered from the signer's own memory, with no API call. The agent poll
 then calls `dexConfirmTx` with the hash as
 usual — confirmation stays an explicit agent action rather than something the
 signing server does behind its back.
+
+After a **deposit** the `next` field points at `getOrder` instead: a CEX watches its own
+deposit address and credits the order itself, and `dexConfirmTx` on a CEX order would pay
+the $0.01 exchange tier for a call that does not apply.
+
+### `cexDepositRequest({ houdiniId })`
+
+The same page, for the other half of the problem. A CEX order is funded by sending money
+to a deposit address, and the agent's only previous move was to print that address and
+hope. Deposit addresses on EVM chains are ordinary addresses, so a wallet will send one on
+Ethereum as readily as on Base — and that loss is unrecoverable. Prefilling the network,
+address and amount removes the choice rather than warning about it.
+
+Returns the same envelope as `dexSignRequest`. Native coins go as a plain transfer, tokens
+as an ERC-20 `transfer(address,uint256)`.
+
+**It refuses rather than guesses**, because every failure here is an irreversible transfer:
+
+| Case | Why not |
+|------|---------|
+| Order is a DEX order | Its `depositAddress` is only an echo of the sender; use `dexSignRequest` |
+| Order is past `WAITING` | The exchange has already seen a deposit; a second page invites a second send |
+| Non-EVM chain or address | The page signs through `window.ethereum` and cannot reach that chain |
+| Token decimals unknown | Defaulting to 18 sends the wrong amount by orders of magnitude |
+| Amount does not fit the decimals | A silently rounded deposit is one the exchange may re-rate |
+
+Amounts are scaled on the decimal string, never through a float: `0.006 * 1e18` is
+`6000000000000000.1` as a double, and `28.1 * 1e6` is `28099999.999999996`. See
+`src/units.ts`.
+
+This does **not** make the agent able to move funds. The wallet still signs, and the user
+still confirms — the same trust boundary as `dexSignRequest`. An agent with no human at a
+browser cannot use it, which is the point.
 
 ## Security
 

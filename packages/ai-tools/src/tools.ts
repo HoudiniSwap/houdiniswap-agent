@@ -61,7 +61,7 @@ export const createTools = (client: HoudiniClient) => ({
     }),
 
     getOrders: tool({
-        description: "List swap orders with optional filters. Requires API key authentication.",
+        description: "List swap orders with optional filters. Works with API-key or x402 authentication.",
         inputSchema: ordersSchema,
         execute: async (params) =>
             client.get<{ orders: Order[]; totalPages: number }>("/orders", params),

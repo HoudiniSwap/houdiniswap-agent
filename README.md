@@ -105,12 +105,18 @@ npx -y @houdiniswap/mcp-server --transport=http
 | `dexConfirmTx` | $0.01 | Confirm DEX transaction |
 | `dexChainSignatures` | $0.0001 | Multi-step signature chain |
 | `dexSignRequest` | $0.0001 | Open a loopback page so the user signs the swap in their own browser wallet (EVM) |
-| `dexSignStatus` | free | Poll for the result of that signature |
+| `cexDepositRequest` | $0.0001 | Open the same page so the user sends a CEX order's deposit, prefilled (EVM) |
+| `dexSignStatus` | free | Poll for the result of either |
 
 `dexSignRequest` is how a user should sign a DEX swap: it serves a page on `127.0.0.1` and hands
 the transaction to their wallet, so no private key is ever pasted anywhere. EVM only, and it signs
-the swap rather than the approval — the approval happens before an order exists. See
-[docs/local-signing.md](docs/local-signing.md).
+the swap rather than the approval — the approval happens before an order exists.
+
+`cexDepositRequest` does the same for the deposit a CEX order waits on, with the network, address
+and amount already filled in. A deposit address is an ordinary EVM address, so a wallet will send
+it on the wrong chain just as readily as the right one; prefilling removes that choice instead of
+warning about it. Neither tool lets the agent move funds — the wallet signs and the user confirms.
+See [docs/local-signing.md](docs/local-signing.md).
 
 ### Composite Tool
 

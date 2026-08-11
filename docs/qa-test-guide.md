@@ -8,12 +8,22 @@ literally.
 |---|---|
 | `@houdiniswap/mcp-server` | 0.1.14 |
 | plugin | 0.1.10 |
-| tools | 15 |
+| tools | 16 |
 | network | Base (`eip155:8453`) |
 
 Costs, minimums and status codes below were measured against the live API, not
 copied from other documentation. If the backend changes provider minimums, the
 figures in T4 drift.
+
+Every case here has now been run end to end against mainnet with real funds,
+including the CEX, private and Permit2 paths. Where a case has a **Known good**
+line, that is a measured result, not an expectation.
+
+> **Open backend issue — do not be surprised by it.** Under x402 every payer is
+> authenticated as the same partner, so `getOrders` and `getOrder` return **other
+> people's orders**, private ones included. Reported separately; it is a backend
+> scoping fix, not something this package can correct. Do not file it again, and do
+> not treat a stranger's order in your list as a client bug.
 
 ---
 
@@ -200,9 +210,20 @@ Configure a wallet with no USDC and call any tool.
 
 Ask for a swap well below the minimum — for example $2 of USDC to SOL via CEX.
 
-- **Expect:** it reports the minimum rather than producing a doomed order. Measured
-  minimums from USDC on Base: **~$5** for DEX; **$10.50** to SOL, **$17** to USDT
-  (Tron), **$20** to ETH, **$30** to XRP for CEX.
+- **Expect:** it reports the minimum rather than producing a doomed order. The API
+  answers a below-minimum quote with `AMOUNT_TOO_LOW 422` naming the figure, so this
+  should never reach `createExchange`.
+- Measured minimums from USDC on Base:
+
+  | Route | Minimum |
+  |---|---|
+  | DEX | 5.00 |
+  | CEX → SOL | 10.50 |
+  | CEX → USDT (Tron) | ~17 |
+  | CEX → ETH | 20.01 |
+  | CEX → XRP | ~30 |
+  | **Private (any destination)** | **26.26** |
+
 - **Fails if:** it creates an order anyway, spending $0.01 on something that cannot
   execute.
 
@@ -241,22 +262,50 @@ Send the stated amount to the deposit address, then track the order.
   **`FINISHED` (4)**, and the output lands at your destination address.
 - **Watch for:** status **5 is EXPIRED, not success**, and **6 is FAILED**. A swap
   reported as successful on either is a serious bug — file it immediately.
-- **Note:** this leg has never been completed in testing. Every CEX order so far
-  expired unfunded. It is the highest-value case in this document.
+- **Known good:** completed twice. 0.006 ETH Base → Arbitrum settled in ~4.5 min,
+  and 0.006 ETH → USDC on Base in ~2 min. Both paid out within a hair of the quote,
+  and `outAmount` reconciled to the on-chain credit.
 
 #### T8 — Private (anonymous 2-hop) swap **[funds]**
 
-Request a private swap. Minimum is higher than CEX — about **$30** from USDC.
+Request a private swap. The minimum is much higher than CEX and is set by the
+**input** leg, not the destination: **26.26 from USDC on Base**, the same figure
+whether you send to ETH or SOL.
 
+- **Take the minimum from `getMinMax().private.min`.** The `min` on an individual
+  quote is the provider's leg minimum and understates it roughly threefold — quotes
+  advertising `min` of 9.11–14.99 were all rejected at 10 with `AMOUNT_TOO_LOW`.
 - **Expect:** same deposit-address flow as CEX. Private quotes carry **no provider
   name** — deliberate, not a bug, since naming the hops would defeat the privacy.
+  The finished order carries none either.
+- **Also check:** it passes through status **3 `ANONYMIZING` /
+  `SECOND_EXCHANGE_IN_PROGRESS`** between the hops, with the first leg FINISHED
+  while the second is EXCHANGING. That is progress, not a stall.
 - **Fails if:** a missing `swap` field on a private quote is treated as an error, or
   the intermediate hop is described as "randomised" (it is a best-of selection).
+- **Known good:** 26.5 USDC → 0.013835820 ETH on Base, settled in **~2 minutes**
+  against a 13-minute ETA, `outAmount` matching the chain exactly.
 
 ### DEX swaps and browser signing
 
 The newest surface and the one most worth hammering. A DEX swap is signed by *you*,
 in your own wallet — the server's payment key must never touch it.
+
+> **Read this before filing a DEX revert.** The order says it expires in 30 minutes,
+> but the transaction inside it goes stale in **one to two minutes**. Identical
+> calldata replayed with `eth_call` succeeded at the order's creation block and
+> reverted 79 blocks (~2.5 min) later, against a pool holding 20,000 USDC and 10
+> WETH — price movement, not liquidity.
+>
+> It is provider-specific. A SushiSwap route encoded an outer bound of quote × 0.995
+> **despite `slippage: 1` being requested**, and an inner bound equal to the quote
+> exactly — zero headroom. A Uniswap route for the same pair embedded an explicit
+> deadline, honoured the requested slippage, and survived. **Use Uniswap for the
+> signing-flow cases (T10–T13)**, or SushiSwap will hand you spurious failures.
+>
+> Sign promptly, and re-quote from scratch if you dawdle — a fresh `dexSignRequest`
+> on the same order serves the same stale calldata. Nothing is lost when this
+> happens: the page estimates gas first, so no funds move.
 
 #### T9 — Allowance check and approval **[funds]**
 
@@ -266,7 +315,30 @@ allowance set.
 - **Expect:** the allowance check reports insufficient, and an approval step is
   produced. Approvals are **not** covered by `dexSignRequest` — no order exists yet at
   that point — so you will be handed the approval transaction to submit yourself.
-- **Check:** the approval is capped at the swap amount, not unlimited.
+- **Check:** the approval is capped at the swap amount, not unlimited. Verified:
+  SushiSwap returned `approve(router, 0x53ec60)` = exactly 5.5 USDC, and the
+  allowance went 0 → 5.5 → **0**, fully consumed with no residual.
+- **Note:** `requiresApproval` on the quote and `dexCheckAllowance` mean different
+  things. The first is a static provider capability and stays `true` even when you
+  already hold an allowance; the second is the live check. Approve on the second,
+  or you will send a redundant approval before every swap.
+
+#### T9b — Permit2 signature path **[funds]**
+
+Pick a provider whose quote shows `supportsSignatures: true` — PancakeSwap and
+Uniswap do, SushiSwap does not — and call `dexApprove` with `usePermit: true`.
+
+- **Expect:** `signatures[]` populated with EIP-712 `PermitSingle` typed data for
+  **Permit2** (`0x31c2F6…c768`), plus a one-time on-chain `approve` to Permit2 in
+  `approvals[]`. Sign the typed data and pass it to `createExchange` as
+  `signatures: [{ key, signature, swapRequiredMetadata }]`.
+- **Check:** the permit `amount` is capped at the swap amount, and afterwards the
+  Permit2 **nonce has incremented by exactly 1** — the signature is single-use.
+  Both the Permit2 allowance and the ERC-20 allowance to Permit2 should read 0.
+- **Once the on-chain approve exists,** a second `dexApprove` returns
+  `approvals: []`. That is correct, not a failure.
+- **Fails if:** the permit is written for an unlimited amount, the nonce does not
+  move, or an allowance is left behind.
 
 #### T10 — Signing page opens and reads correctly **[paid]**
 
@@ -316,13 +388,26 @@ Open a signing page and press **Cancel** in the wallet instead of approving.
 
 Security checks on the local signing server. Requires no wallet.
 
-- Open a signing URL with one character of the token changed → **404**.
-- Reload a URL after it has been signed → the request is already resolved; it cannot
-  be signed twice.
-- Let a signing link sit past the order's expiry, then open it → **404**.
-- From another machine on the network, request
-  `http://<this-machine-ip>:PORT/sign/...` → **connection refused**. It binds loopback
-  only.
+All eleven of these pass today; re-run them after any change to the signer.
+
+| Check | Expected |
+|---|---|
+| Token with one character changed | 404 |
+| Empty token (`/sign/`) | 404 |
+| Path traversal (`/sign/../../etc/passwd`) | 404 |
+| Any unrelated path (`/`) | 404 |
+| Request from another machine on the LAN | **connection refused** — loopback only |
+| POST with no `Origin` header | 403 |
+| POST with `Origin: https://evil.example` | 403 |
+| POST body of 3 MB | 413 |
+| Reload after signing | already resolved; cannot be signed twice |
+| Link left past the order's expiry | see below |
+| `dexSignStatus` on a long-dead token | `expired`, with "get a fresh link" |
+
+**On the expiry case:** you get a *connection refused*, not a 404, because the
+server shuts its listener down entirely once nothing is pending. That is stronger
+than a 404, not a regression. Confirm with `ss -ltn | grep <port>` — nothing should
+be bound.
 
 **Fails if** any of these succeeds. The token is the only access control the signer
 has.
@@ -332,10 +417,54 @@ has.
 Use the composite `swap` tool for a simple CEX swap.
 
 - **Expect:** token lookup, amount validation, best quote and order creation in a
-  single call, returning a deposit address.
+  single call, returning a deposit address, the provider, and the order's `expires`.
 - **Known limitation:** it deliberately skips the route menu, the unverified-token
   warning and the price-impact check, and may pick a *private* route. Documented
   behaviour — worth confirming, not filing.
+- **Known good:** 0.006 ETH → USDC on Base via ChangeNow, FINISHED in ~2 min.
+
+#### T16 — Cross-chain DEX **[funds]**
+
+Quote a DEX swap between two chains — e.g. ETH on Arbitrum → ETH on Base. Bungee,
+Uniswap and Near Intents all return cross-chain routes, and they beat the CEX rate
+for the same pair.
+
+- **Critical:** the transaction's `value` is **larger than the order's `inAmount`** —
+  the bridge fee rides on top. A 0.0059 ETH order carried `value` of 0.005929… ETH,
+  a flat ~0.0000292 ETH more.
+- **Check:** budget gas *on top of `value`*. That same order needed **480,000 gas**
+  and left only 140,000 affordable, so a wallet funded to `inAmount` cannot send it.
+  The signing page now refuses this before opening the wallet, naming the shortfall.
+- **Fails if:** the agent sizes the transaction from `inAmount`, or the page opens a
+  wallet for a transaction the balance cannot cover.
+- **Known good:** 0.00585 ETH Arbitrum → Base landed **exactly** 0.005843 ETH in ~90s.
+
+#### T17 — Rate limiting **[free]**
+
+The limit is 60 requests/minute, but the IP-keyed counter increments **before**
+payment, so unpaid 402s count too.
+
+- Fire unauthenticated `GET /v2/chains` in a loop. A 429 arrives after ~60–67
+  requests, with `code`, `message`, `requestId` and `retryAfter` in the body.
+- **Because x402 is request → 402 → retry-with-payment, each completed paid call
+  costs the IP counter two.** Budget **~30 completed calls per minute per IP**.
+- **Note for a test team:** the bucket is per-IP, so testers behind one office NAT
+  share it no matter whose wallet pays — and it can be exhausted by traffic that
+  never pays at all.
+
+#### T18 — No stale servers **[free]**
+
+Before testing any version change, check nothing old is still running:
+
+```bash
+pgrep -af houdiniswap-mcp        # expect one server, not seven
+pkill -f houdiniswap-mcp         # then fully restart the client
+```
+
+Instances accumulate — seven were found alive at once, the oldest up 25 hours,
+because each `npm exec` parent outlives its client session and nothing reaps it.
+Every one of them holds your wallet key in `/proc/<pid>/environ`. This is the real
+mechanism behind [the restart trap](#the-trap-that-will-waste-your-afternoon).
 
 ---
 
@@ -383,6 +512,14 @@ takes roughly 15 seconds and can read as a hang. That is expected.
   there is nothing to bind the request to.
 - **No free tool.** First run without a funded wallet fails on every call. Known and
   intentional; a product decision, not a defect.
+- **A DEX order's `outAmount` is the quote, not the settlement.** It is never
+  reconciled after the swap, so it reads a hair high — 0.002929681 against a
+  delivered 0.002929389 in one measured case. CEX and private orders *do* reconcile
+  exactly, so the mismatch is DEX-only. Backend ticket; check the chain, not the
+  field.
+- **Other people's orders in `getOrders`.** See the note at the top of this guide.
+- **A DEX revert one to two minutes after ordering.** Expected; see the box above
+  T9. Only file it if it happens when you sign *promptly*.
 
 ---
 

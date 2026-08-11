@@ -109,8 +109,19 @@ export const registerSwapFlowTool = (server: McpServer, client: HoudiniClient) =
                         depositAddress,
                         estimatedOutput: bestQuote.amountOut,
                         provider: bestQuote.swapName,
+                        // Without this the caller has no idea how long they have
+                        // to send. An order that expires unfunded is the most
+                        // common way a CEX swap dies, and the deadline was the
+                        // one field this tool dropped from createExchange.
+                        expires: order.expires,
                     },
-                    instructions: `Send ${amount} ${fromSymbol} to ${depositAddress} to complete the swap.`,
+                    // A private route carries no provider name, and this tool
+                    // does not exclude one — so say "provider" rather than
+                    // inventing a name the quote never gave.
+                    instructions:
+                        `Send exactly ${amount} ${fromSymbol} to ${depositAddress} to complete the swap.` +
+                        (order.expires ? ` The order expires at ${order.expires}.` : "") +
+                        ` Use cexDepositRequest with houdiniId ${order.houdiniId} to send it from the user's own wallet.`,
                 });
             } catch (err) {
                 const message = err instanceof Error ? err.message : "Unknown error";

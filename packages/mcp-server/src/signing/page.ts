@@ -1,7 +1,12 @@
 export interface SignableTransaction {
     from?: string;
     to: string;
-    data: string;
+    /**
+     * Absent for a native-currency transfer, which is what a CEX deposit in the
+     * chain's own coin is. Every DEX swap carries calldata, so this was required
+     * until deposits started using the same page.
+     */
+    data?: string;
     value?: string;
     gasPrice?: number | string;
 }
@@ -18,6 +23,13 @@ export interface OrderFacts {
     outAmount?: number;
     outSymbol?: string;
     receiverAddress?: string;
+    /**
+     * Set only for a CEX deposit, where it is both the page's subject and the
+     * discriminator: its presence is what makes this a deposit rather than a
+     * swap. The two need different labels, and mislabelling the address a user
+     * is about to send funds to is the one mistake this page must not make.
+     */
+    depositAddress?: string;
 }
 
 /**
@@ -42,6 +54,17 @@ const CHAIN_NAMES: Record<number, string> = {
     43114: "Avalanche",
 };
 
+/** Only for naming the shortfall in the balance check; falls back to "funds". */
+const NATIVE_SYMBOLS: Record<number, string> = {
+    1: "ETH",
+    10: "ETH",
+    56: "BNB",
+    137: "POL",
+    8453: "ETH",
+    42161: "ETH",
+    43114: "AVAX",
+};
+
 /**
  * A summary the user can check *before* the wallet opens. The wallet shows its
  * own review on top of this; the point here is that the amounts and addresses
@@ -61,18 +84,39 @@ export const summarise = (
     // swap differently, so decoding `data` generically is not on the table.
     const inTicker = asTicker(order.inSymbol);
     const outTicker = asTicker(order.outSymbol);
+    const deposit = order.depositAddress !== undefined;
+
     if (order.inAmount !== undefined) {
         rows.push({ label: "You send", value: `${order.inAmount}${inTicker ? ` ${inTicker}` : ""}` });
     }
+
+    if (deposit) {
+        // First, and under its own name. On a deposit the address that matters
+        // is the exchange's, not the order's receiverAddress — that one is
+        // where the swap pays out hours later, and showing it as "Recipient"
+        // next to a transfer would name the wrong destination in the only row
+        // a careful user actually checks.
+        rows.push({ label: "Deposit address", value: order.depositAddress as string });
+        // Only for an ERC-20 deposit, where the transfer is a call to the token
+        // rather than a send to the exchange. For a native deposit `to` is the
+        // deposit address already on show, and repeating it as "Contract" reads
+        // as a second, different destination.
+        if (tx.to.toLowerCase() !== (order.depositAddress as string).toLowerCase()) {
+            rows.push({ label: "Token contract", value: tx.to });
+        }
+    }
+
     if (order.outAmount !== undefined) {
         rows.push({
             label: "You receive (est.)",
             value: `${order.outAmount}${outTicker ? ` ${outTicker}` : ""}`,
         });
     }
-    if (order.receiverAddress) rows.push({ label: "Recipient", value: order.receiverAddress });
+    if (order.receiverAddress) {
+        rows.push({ label: deposit ? "Order pays out to" : "Recipient", value: order.receiverAddress });
+    }
 
-    rows.push({ label: "Contract", value: tx.to });
+    if (!deposit) rows.push({ label: "Contract", value: tx.to });
     // BigInt throws on anything that is not an integer literal — "1.5", "abc",
     // and notably "1e+21", which is what JSON.stringify gives for a large
     // number that went through a float. Never let that escape: this runs
@@ -92,7 +136,12 @@ export const summarise = (
                   ? "none"
                   : `${(Number(value) / 1e18).toFixed(8)} (native units)`,
     });
-    rows.push({ label: "Calldata", value: `${tx.data.slice(0, 34)}… (${tx.data.length - 2} hex chars)` });
+    rows.push({
+        label: "Calldata",
+        value: tx.data
+            ? `${tx.data.slice(0, 34)}… (${tx.data.length - 2} hex chars)`
+            : "none — a plain transfer, no contract call",
+    });
     return rows;
 };
 
@@ -106,6 +155,11 @@ export const renderSignPage = (
     const rows = summarise(tx, chainId, order)
         .map((r) => `<tr><th>${esc(r.label)}</th><td>${esc(r.value)}</td></tr>`)
         .join("");
+    // A deposit moves the user's funds to an exchange and nothing comes back
+    // until the order settles, so the page should not tell them they are
+    // signing a swap.
+    const deposit = order.depositAddress !== undefined;
+    const heading = deposit ? "Send your deposit" : "Sign your swap";
 
     // The transaction is embedded server-side. The page never takes one from the
     // URL or from a message, so nothing a third party controls can be signed.
@@ -116,7 +170,13 @@ export const renderSignPage = (
     // two line separators that are literal in JSON but terminators in JS —
     // makes the payload safe to inline. Caught by its own test, having written
     // the bug first.
-    const payload = JSON.stringify({ tx, chainId, token, houdiniId })
+    const payload = JSON.stringify({
+        tx,
+        chainId,
+        token,
+        houdiniId,
+        native: NATIVE_SYMBOLS[chainId] ?? "funds",
+    })
         .replace(/</g, "\\u003c")
         .replace(/>/g, "\\u003e")
         .replace(/&/g, "\\u0026")
@@ -128,7 +188,7 @@ export const renderSignPage = (
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sign swap · HoudiniSwap</title>
+<title>${esc(heading)} · HoudiniSwap</title>
 <style>
   :root { color-scheme: light dark; --fg:#111; --muted:#666; --bg:#fff; --card:#f6f6f7; --line:#e3e3e6; --accent:#2b6cff; --ok:#0a7c42; --bad:#b3261e; }
   @media (prefers-color-scheme: dark) { :root { --fg:#e9e9ea; --muted:#9b9ba0; --bg:#141416; --card:#1d1d20; --line:#2c2c31; --accent:#6f9bff; --ok:#4ade80; --bad:#ff6b6b; } }
@@ -153,14 +213,14 @@ export const renderSignPage = (
 </head>
 <body>
 <main>
-  <h1>Sign your swap</h1>
+  <h1>${esc(heading)}</h1>
   <p class="sub">Order <code>${esc(houdiniId)}</code> · your wallet will show its own confirmation before anything is sent.</p>
 
   <div class="card">
     <table>${rows}</table>
   </div>
 
-  <button id="go">Connect wallet and sign</button>
+  <button id="go">${deposit ? "Connect wallet and send" : "Connect wallet and sign"}</button>
   <div id="status"></div>
 
   <p class="note">
@@ -171,7 +231,7 @@ export const renderSignPage = (
 </main>
 <script>
 (() => {
-  const { tx, chainId, token } = ${payload};
+  const { tx, chainId, token, native } = ${payload};
   const btn = document.getElementById("go");
   const out = document.getElementById("status");
   const say = (msg, cls) => { out.textContent = msg; out.className = cls || ""; };
@@ -214,7 +274,9 @@ export const renderSignPage = (
         const s = String(v);
         return s.startsWith("0x") ? s : "0x" + BigInt(s).toString(16);
       };
-      const call = { from: accounts[0], to: tx.to, data: tx.data, value: toQuantity(tx.value) };
+      // "0x" rather than undefined: a native deposit carries no calldata, and
+      // some wallets reject a transaction whose data field is missing outright.
+      const call = { from: accounts[0], to: tx.to, data: tx.data || "0x", value: toQuantity(tx.value) };
 
       // Estimate explicitly rather than letting the wallet fill it in. When
       // MetaMask's own estimate does not arrive it substitutes a block-sized
@@ -232,6 +294,32 @@ export const renderSignPage = (
         say("This swap would fail on-chain, so nothing was sent: " + why, "bad");
         await report({ error: "gas estimation failed: " + why });
         return;
+      }
+
+      // Check the balance covers value + gas before the wallet opens. Two real
+      // cases land here: a native CEX deposit is sized to the order, not to the
+      // wallet, so a user who deposits "everything" cannot pay gas; and a
+      // cross-chain swap adds the bridge fee *on top* of the order's inAmount,
+      // so \`value\` exceeds the amount the user was quoted. Both otherwise fail
+      // inside the wallet, after the user has read and approved everything.
+      try {
+        const [balance, gasPrice] = await Promise.all([
+          window.ethereum.request({ method: "eth_getBalance", params: [accounts[0], "latest"] }),
+          window.ethereum.request({ method: "eth_gasPrice", params: [] }),
+        ]);
+        const need = BigInt(call.value) + BigInt(gas) * BigInt(gasPrice);
+        if (need > BigInt(balance)) {
+          const short = Number(need - BigInt(balance)) / 1e18;
+          const msg =
+            "Not enough " + native + " to cover this transaction plus gas — short by about " +
+            short.toFixed(8) + " " + native + ". Nothing was sent.";
+          say(msg, "bad");
+          await report({ error: msg });
+          return;
+        }
+      } catch {
+        // A wallet that will not answer eth_getBalance/eth_gasPrice is no reason
+        // to block a transaction that already estimated cleanly.
       }
 
       say("Confirm the transaction in your wallet…");
