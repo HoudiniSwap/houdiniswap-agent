@@ -53,7 +53,14 @@ jobs:
         run: npm install -g npm@^11
 
       - name: Install dependencies
-        run: npm ci
+        # --ignore-scripts because this job holds `id-token: write`, and the OIDC
+        # request URL and token sit in the environment of every process it
+        # spawns. A postinstall anywhere in the dependency tree could therefore
+        # mint an npm token and publish — no commit, no review, no maintainer
+        # account involved. Nothing in the tree needs an install script; CI runs
+        # the same flags, so a dependency that starts needing one fails there
+        # first rather than here.
+        run: npm ci --ignore-scripts
 
       - name: Build
         run: npm run build

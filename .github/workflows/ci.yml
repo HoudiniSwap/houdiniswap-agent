@@ -27,7 +27,9 @@ jobs:
         # `npm ci`, not `npm install`: a lockfile is committed, and `npm install`
         # is free to resolve something other than what it pins — so CI would be
         # validating a different dependency set from the one the release builds.
-        run: npm ci
+        # --ignore-scripts matches publish.yml, so CI exercises the same install
+        # the release performs rather than a more permissive one.
+        run: npm ci --ignore-scripts
 
       - name: Build
         run: npx turbo run build
