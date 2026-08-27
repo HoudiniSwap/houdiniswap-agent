@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege: this workflow only reads the tree. Without this block it
+# inherits the repository default, which is write — a token with write scope on
+# a job that executes code from a pull request.
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
