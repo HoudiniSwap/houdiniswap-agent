@@ -1,7 +1,7 @@
 # @houdiniswap/ai-tools
 
 [Vercel AI SDK](https://sdk.vercel.ai) tool definitions for
-[HoudiniSwap](https://houdiniswap.com) — crypto swap aggregation across 14 CEXes and 20+ DEXes, paid
+[HoudiniSwap](https://houdini.com) — crypto swap aggregation across 14 CEXes and 20+ DEXes, paid
 per call in USDC on Base via [x402](https://docs.cdp.coinbase.com/x402/welcome).
 
 ```bash

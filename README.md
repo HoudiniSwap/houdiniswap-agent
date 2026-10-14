@@ -1,6 +1,6 @@
 # HoudiniSwap Agent
 
-MCP Server + AI SDK Tools for [HoudiniSwap](https://houdiniswap.com) — agent-friendly crypto swap aggregation with x402 pay-per-use.
+MCP Server + AI SDK Tools for [HoudiniSwap](https://houdini.com) — agent-friendly crypto swap aggregation with x402 pay-per-use.
 
 ## What is this?
 

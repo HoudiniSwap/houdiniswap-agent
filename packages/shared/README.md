@@ -1,7 +1,7 @@
 # @houdiniswap/agent-shared
 
 Shared HTTP and [x402](https://docs.cdp.coinbase.com/x402/welcome) payment client for the
-[HoudiniSwap](https://houdiniswap.com) agent packages.
+[HoudiniSwap](https://houdini.com) agent packages.
 
 **You probably do not want to install this directly.** It is a runtime dependency of
 [`@houdiniswap/mcp-server`](https://www.npmjs.com/package/@houdiniswap/mcp-server) and
