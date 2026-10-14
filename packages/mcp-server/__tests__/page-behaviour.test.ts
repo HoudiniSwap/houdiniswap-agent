@@ -121,6 +121,19 @@ describe("what the page actually hands the wallet", () => {
         expect(BigInt(params.value)).toBe(2_740_000_000_000_000n);
     });
 
+    // Uniswap routes arrive already in hex, but byte-padded: this is the value
+    // of a real 0.004 ETH swap on Base. Phantom refuses a quantity with a
+    // leading zero ("Missing or invalid parameters") at the estimate, so the
+    // swap failed before the wallet ever opened.
+    it("strips the leading zero from a hex value before the wallet sees it", async () => {
+        const h = load(page({ ...TX, value: "0x0e35fa931a0000" }), happy);
+        await h.click();
+        for (const method of ["eth_estimateGas", "eth_sendTransaction"]) {
+            const call = h.calls.find((c) => c.method === method);
+            expect((call?.params?.[0] as { value: string }).value).toBe("0xe35fa931a0000");
+        }
+    });
+
     // Left to fill it in itself, a wallet whose estimate does not arrive
     // substitutes a block-sized default — 140,000,000 against Base's 25,000,000
     // cap — and the RPC rejects the send after the user has approved it.
