@@ -5,8 +5,13 @@ export interface HoudiniConfig {
     timeoutMs?: number;
 }
 
+/**
+ * x402 pays per call from `privateKey` (EVM, USDC on Base), `svmPrivateKey`
+ * (Solana secret key in base58, USDC on Solana), or both.
+ */
 export type HoudiniAuth =
-    | { type: "x402"; privateKey: `0x${string}` }
+    | { type: "x402"; privateKey: `0x${string}`; svmPrivateKey?: string }
+    | { type: "x402"; privateKey?: `0x${string}`; svmPrivateKey: string }
     | { type: "apiKey"; key: string }
     | { type: "partnerId"; id: string }
     | { type: "none" };

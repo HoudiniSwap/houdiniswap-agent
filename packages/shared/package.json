@@ -40,8 +40,10 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@x402/core": "^2.7.0",
-    "@x402/evm": "^2.7.0",
+    "@solana/kit": "^5.5.1",
+    "@x402/core": "^2.28.0",
+    "@x402/evm": "^2.28.0",
+    "@x402/svm": "^2.28.0",
     "viem": "^2.39.3"
   },
   "devDependencies": {

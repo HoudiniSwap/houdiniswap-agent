@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-MCP server + Vercel AI SDK tools that let AI agents discover, quote, and execute crypto swaps via the HoudiniSwap Partner API v2 (14 CEXes + 20+ DEXes). Distinguishing feature: x402 pay-per-request auth — agents pay per API call in USDC on Base, no signup.
+MCP server + Vercel AI SDK tools that let AI agents discover, quote, and execute crypto swaps via the HoudiniSwap Partner API v2 (14 CEXes + 20+ DEXes). Distinguishing feature: x402 pay-per-request auth — agents pay per API call in USDC on Base or Solana, no signup.
 
 ## Commands
 
@@ -59,11 +59,11 @@ Three packages under `packages/`, all ESM (`"type": "module"`, `moduleResolution
 
 `HoudiniClient` (`packages/shared/src/client.ts`) is a thin `fetch` wrapper: `get(path, params)` builds a query string (skipping null/undefined, expanding arrays); `post(path, body)` sends JSON; both throw `HoudiniApiError` on non-2xx. Auth is a tagged union (`HoudiniAuth`): `apiKey` → `Authorization` header, `partnerId` → `partner-id` header, `x402` → swaps in the x402 fetch wrapper, `none` → no headers.
 
-The MCP entrypoint resolves auth from env vars with this precedence (`packages/mcp-server/src/auth.ts`): `HOUDINI_API_KEY` > `HOUDINI_X402_PRIVATE_KEY` > `HOUDINI_PARTNER_ID` > none. Base URL defaults to `https://api-partner.houdiniswap.com/v2` (override with `HOUDINI_API_URL`).
+The MCP entrypoint resolves auth from env vars with this precedence (`packages/mcp-server/src/auth.ts`): `HOUDINI_API_KEY` > `HOUDINI_X402_PRIVATE_KEY` and/or `HOUDINI_X402_SVM_PRIVATE_KEY` (Solana, base58) > `HOUDINI_PARTNER_ID` > none. Base URL defaults to `https://api-partner.houdiniswap.com/v2` (override with `HOUDINI_API_URL`).
 
 ### x402 payment flow
 
-`createX402Fetch` (`packages/shared/src/x402.ts`) returns a `fetch` that intercepts `402 Payment Required`, signs a gasless USDC `transferWithAuthorization` (EIP-3009) via `@x402/*` + `viem`, and retries with payment headers. **It enforces a 5-second minimum gap between payments** (`MIN_PAYMENT_INTERVAL_MS`) to avoid EIP-3009 nonce collisions — so rapid sequential paid calls (e.g. the multi-step `swap` flow) are deliberately throttled and can feel slow. This is intentional; don't "fix" it by removing the delay.
+`createX402Fetch` (`packages/shared/src/x402.ts`) returns a `fetch` that intercepts `402 Payment Required`, signs a USDC payment, and retries with payment headers: a gasless `transferWithAuthorization` (EIP-3009, `@x402/evm` + `viem`) on Base for an EVM key, a USDC transfer whose fee the facilitator pays (`@x402/svm` + `@solana/kit`) on Solana for a Solana key. A spend policy and a pre-signing hook only allow USDC on the networks a key was given for, capped per payment. **It enforces a 5-second minimum gap between payments** (`MIN_PAYMENT_INTERVAL_MS`) to avoid EIP-3009 nonce collisions — so rapid sequential paid calls (e.g. the multi-step `swap` flow) are deliberately throttled and can feel slow. This is intentional; don't "fix" it by removing the delay.
 
 ## Conventions
 

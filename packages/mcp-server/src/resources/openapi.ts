@@ -64,7 +64,7 @@ export const registerResources = (server: McpServer, client: HoudiniClient) => {
                     "  so every tool call costs at least $0.0001 and a funded wallet is required.",
                     "",
                     "Rate limits: 60 requests/minute per payer address",
-                    "Network: Base (eip155:8453) — USDC payments",
+                    "Networks: Base (eip155:8453) or Solana mainnet (solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp) — USDC payments",
                     "",
                     "A complete swap flow costs ~$0.012:",
                     "  2x getTokens ($0.0002) + getMinMax ($0.0001) + getQuote ($0.001) + createExchange ($0.01) + getOrder ($0.0001)",

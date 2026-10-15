@@ -1,10 +1,47 @@
+import { createKeyPairSignerFromBytes, getBase58Encoder } from "@solana/kit";
 import { x402Client, x402HTTPClient } from "@x402/core/client";
 import { registerExactEvmScheme } from "@x402/evm/exact/client";
+import { registerExactSvmScheme } from "@x402/svm/exact/client";
 import { privateKeyToAccount } from "viem/accounts";
-import { USDC_BASE } from "./constants.js";
+import { BASE_NETWORK, SOLANA_NETWORK, USDC_BASE, USDC_SOLANA } from "./constants.js";
 
-/** Base mainnet, the only network this API settles on. */
-const BASE_NETWORK = "eip155:8453";
+/** The wallets x402 pays from. At least one is required. */
+export interface X402Keys {
+    /** EVM private key (0x + 64 hex). Pays with USDC on Base. */
+    evm?: `0x${string}`;
+    /** Solana secret key in base58, the 64 bytes Phantom or Solflare export. Pays with USDC on Solana. */
+    svm?: string;
+}
+
+/** Whether `value` is a base58 string that decodes to a 64-byte Solana secret key. */
+export const isSvmSecretKey = (value: string): boolean => {
+    try {
+        return getBase58Encoder().encode(value).length === 64;
+    } catch {
+        return false;
+    }
+};
+
+/** A network and token this client agrees to pay with. */
+interface PaymentTarget {
+    network: string;
+    asset: string;
+    label: string;
+}
+
+const BASE_USDC: PaymentTarget = { network: BASE_NETWORK, asset: USDC_BASE, label: `USDC on Base (${USDC_BASE})` };
+const SOLANA_USDC: PaymentTarget = {
+    network: SOLANA_NETWORK,
+    asset: USDC_SOLANA,
+    label: `USDC on Solana (${USDC_SOLANA})`,
+};
+
+// An EVM address is the same in any casing; a Solana mint is base58, where
+// casing is part of the address.
+const isTarget = (r: PaymentRequirement | undefined, t: PaymentTarget): boolean =>
+    r?.network === t.network &&
+    typeof r.asset === "string" &&
+    (t.network.startsWith("eip155:") ? r.asset.toLowerCase() === t.asset.toLowerCase() : r.asset === t.asset);
 
 /**
  * Ceiling on a single payment, in USDC atomic units (6 decimals).
@@ -34,11 +71,10 @@ export interface X402Options {
  * outright if nothing survives — so the failure is a clear error rather than a
  * signature.
  */
-const boundedPaymentPolicy = (maxAmount: bigint) =>
+const boundedPaymentPolicy = (targets: readonly PaymentTarget[], maxAmount: bigint) =>
     (_version: number, requirements: readonly PaymentRequirement[]): PaymentRequirement[] =>
         requirements.filter((r) => {
-            if (r.network !== BASE_NETWORK) return false;
-            if (typeof r.asset !== "string" || r.asset.toLowerCase() !== USDC_BASE.toLowerCase()) return false;
+            if (!targets.some((t) => isTarget(r, t))) return false;
             if (typeof r.amount !== "string") return false;
             let amount: bigint;
             try {
@@ -60,14 +96,37 @@ interface PaymentRequirement {
 const describe = (r?: PaymentRequirement): string =>
     r ? `${r.amount ?? "?"} of ${r.asset ?? "?"} on ${r.network ?? "?"} to ${r.payTo ?? "?"}` : "nothing";
 
-export const createX402Fetch = (privateKey: `0x${string}`, options: X402Options = {}): typeof fetch => {
+/**
+ * A `fetch` that pays for 402 responses. A bare `0x` key pays on Base, as
+ * before; `{ evm, svm }` pays with whichever wallets are given. With both, the
+ * first network the server offers wins — it lists Base first.
+ */
+export const createX402Fetch = (keys: `0x${string}` | X402Keys, options: X402Options = {}): typeof fetch => {
+    const { evm, svm } = typeof keys === "string" ? { evm: keys, svm: undefined } : keys;
+    if (!evm && !svm) throw new Error("createX402Fetch needs an EVM key, a Solana key, or both");
+
     const maxPaymentAtomic = options.maxPaymentAtomic ?? DEFAULT_MAX_PAYMENT_ATOMIC;
-    const signer = privateKeyToAccount(privateKey);
     const client = new x402Client();
-    registerExactEvmScheme(client, { signer });
+    const targets: PaymentTarget[] = [];
+
+    if (evm) {
+        registerExactEvmScheme(client, { signer: privateKeyToAccount(evm) });
+        targets.push(BASE_USDC);
+    }
+
+    // The Solana signer is built asynchronously, so payments wait for it. The
+    // catch only keeps a bad key from crashing the process as an unhandled
+    // rejection before anything is paid; the payment that awaits it still fails.
+    const svmReady = svm
+        ? createKeyPairSignerFromBytes(getBase58Encoder().encode(svm)).then((signer) => {
+              registerExactSvmScheme(client, { signer, networks: [SOLANA_NETWORK] });
+          })
+        : Promise.resolve();
+    svmReady.catch(() => {});
+    if (svm) targets.push(SOLANA_USDC);
 
     client.registerPolicy(
-        boundedPaymentPolicy(maxPaymentAtomic) as unknown as Parameters<typeof client.registerPolicy>[0],
+        boundedPaymentPolicy(targets, maxPaymentAtomic) as unknown as Parameters<typeof client.registerPolicy>[0],
     );
 
     // The policy filters; this makes the refusal legible instead of surfacing as
@@ -81,17 +140,12 @@ export const createX402Fetch = (privateKey: `0x${string}`, options: X402Options 
                 return -1n;
             }
         })();
-        if (
-            r?.network !== BASE_NETWORK ||
-            r?.asset?.toLowerCase() !== USDC_BASE.toLowerCase() ||
-            amount < 0n ||
-            amount > maxPaymentAtomic
-        ) {
+        if (!targets.some((t) => isTarget(r, t)) || amount < 0n || amount > maxPaymentAtomic) {
             return {
                 abort: true,
                 reason:
                     `refusing to sign a payment of ${describe(r)}. ` +
-                    `This client only signs USDC on Base (${USDC_BASE}) up to ${maxPaymentAtomic} atomic units ` +
+                    `This client only signs ${targets.map((t) => t.label).join(" or ")} up to ${maxPaymentAtomic} atomic units ` +
                     `(${Number(maxPaymentAtomic) / 1e6} USDC). A server asking for more than the endpoint's price ` +
                     "should be treated as hostile.",
             };
@@ -150,6 +204,8 @@ export const createX402Fetch = (privateKey: `0x${string}`, options: X402Options 
             if (lastPaymentTime > 0 && elapsed < MIN_PAYMENT_INTERVAL_MS) {
                 await new Promise((r) => setTimeout(r, MIN_PAYMENT_INTERVAL_MS - elapsed));
             }
+
+            await svmReady;
 
             const paymentRequired = httpClient.getPaymentRequiredResponse(
                 (name: string) => res.headers.get(name),

@@ -1,7 +1,7 @@
 {
   "name": "houdiniswap",
   "displayName": "HoudiniSwap Swap Agent",
-  "description": "Discover, quote, and execute crypto swaps across 14 CEXes and 20+ DEXes via HoudiniSwap, with x402 pay-per-call (USDC on Base — no signup).",
+  "description": "Discover, quote, and execute crypto swaps across 14 CEXes and 20+ DEXes via HoudiniSwap, with x402 pay-per-call (USDC on Base or Solana — no signup).",
   "version": "0.1.11",
   "author": {
     "name": "HoudiniSwap",
@@ -22,8 +22,14 @@
   "userConfig": {
     "x402_private_key": {
       "type": "string",
-      "title": "x402 wallet private key",
-      "description": "Required for any data. The API is pay-per-call: every request costs a fraction of a cent in USDC on Base, paid from this wallet. Paste the private key of a wallet funded with USDC on Base — MetaMask's exported key works with or without the 0x prefix. Without a key every request returns 402.",
+      "title": "x402 wallet private key (Base)",
+      "description": "The API is pay-per-call: every request costs a fraction of a cent in USDC, paid from your wallet. Paste the private key of an EVM wallet funded with USDC on Base — MetaMask's exported key works with or without the 0x prefix. Leave empty to pay on Solana instead (next field). Without either key every request returns 402.",
+      "sensitive": true
+    },
+    "x402_solana_private_key": {
+      "type": "string",
+      "title": "x402 Solana private key (optional)",
+      "description": "To pay with USDC on Solana: the base58 private key of a Solana wallet funded with USDC on Solana, as Phantom or Solflare export it. No SOL needed. If both keys are set, Base is used.",
       "sensitive": true
     }
   },
@@ -35,7 +41,8 @@
         "@houdiniswap/mcp-server"
       ],
       "env": {
-        "HOUDINI_X402_PRIVATE_KEY": "${user_config.x402_private_key}"
+        "HOUDINI_X402_PRIVATE_KEY": "${user_config.x402_private_key}",
+        "HOUDINI_X402_SVM_PRIVATE_KEY": "${user_config.x402_solana_private_key}"
       }
     }
   }
