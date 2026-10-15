@@ -6,7 +6,7 @@ literally.
 
 | | |
 |---|---|
-| `@houdiniswap/mcp-server` | 0.1.15 |
+| `@houdiniswap/mcp-server` | 0.1.16 |
 | plugin | 0.1.11 |
 | tools | 16 |
 | network | Base (`eip155:8453`) |
