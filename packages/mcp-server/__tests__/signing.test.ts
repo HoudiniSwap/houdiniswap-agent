@@ -379,7 +379,10 @@ describe("signing page", () => {
         expect(toQuantity("0")).toBe("0x0");
         expect(toQuantity(undefined)).toBe("0x0");
         expect(toQuantity("")).toBe("0x0");
-        expect(toQuantity("0x00")).toBe("0x00");
+        // hex is re-encoded, not passed through: wallets such as Phantom
+        // reject a quantity with a leading zero
+        expect(toQuantity("0x00")).toBe("0x0");
+        expect(toQuantity("0x0e35fa931a0000")).toBe("0xe35fa931a0000");
         // the bug: a decimal string read as hex is ~4000x the intended amount
         expect(toQuantity("2740000000000000")).not.toBe("2740000000000000");
     });
