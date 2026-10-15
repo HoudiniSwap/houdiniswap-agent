@@ -6,10 +6,10 @@ literally.
 
 | | |
 |---|---|
-| `@houdiniswap/mcp-server` | 0.1.16 |
-| plugin | 0.1.11 |
+| `@houdiniswap/mcp-server` | 0.1.17 |
+| plugin | 0.1.12 |
 | tools | 16 |
-| network | Base (`eip155:8453`) |
+| network | Base (`eip155:8453`) or Solana (`solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`) |
 
 Costs, minimums and status codes below were measured against the live API, not
 copied from other documentation. If the backend changes provider minimums, the
