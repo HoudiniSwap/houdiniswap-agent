@@ -136,7 +136,6 @@ const QUOTE_KEYS = [
     "validUntil",
     "min",
     "max",
-    "rewardsAvailable",
     "requiresApproval",
     // Whether this route offers the EIP-2612 permit path, which decides between
     // dexApprove's on-chain approval and the signature chain.
