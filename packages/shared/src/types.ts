@@ -104,7 +104,6 @@ export interface Quote {
     logoUrl?: string;
     min?: number;
     max?: number;
-    rewardsAvailable?: boolean;
     markupSupported?: boolean;
     requiresApproval?: boolean;
     error?: string;

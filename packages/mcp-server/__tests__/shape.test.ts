@@ -42,7 +42,6 @@ const quote = (type: string, amountOut: number) => ({
     amountOutUsd: amountOut * 73.6,
     duration: 6,
     logoUrl: "https://api.houdiniswap.com/assets/logos/nexchange-eu55lk.png",
-    rewardsAvailable: true,
 });
 
 describe("compactToken", () => {
