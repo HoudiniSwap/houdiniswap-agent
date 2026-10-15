@@ -1,6 +1,6 @@
 # @houdiniswap/mcp-server
 
-MCP server for [HoudiniSwap](https://houdiniswap.com) — crypto swap aggregation across 14 CEXes and
+MCP server for [HoudiniSwap](https://houdini.com) — crypto swap aggregation across 14 CEXes and
 20+ DEXes, paid per call in USDC on Base via [x402](https://docs.cdp.coinbase.com/x402/welcome). No
 signup, no API key.
 

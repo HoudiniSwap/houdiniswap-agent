@@ -4,7 +4,7 @@
   "description": "Shared HoudiniSwap API client and types for AI agent integrations",
   "type": "module",
   "license": "MIT",
-  "author": "HoudiniSwap (https://houdiniswap.com)",
+  "author": "HoudiniSwap (https://houdini.com)",
   "homepage": "https://github.com/HoudiniSwap/houdiniswap-agent#readme",
   "repository": {
     "type": "git",
