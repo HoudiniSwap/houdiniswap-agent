@@ -1,4 +1,4 @@
-import { USDC_BASE } from "./constants.js";
+import { USDC_BASE, USDC_SOLANA } from "./constants.js";
 import type { HoudiniConfig, HoudiniAuth, ApiError } from "./types.js";
 import { createX402Fetch } from "./x402.js";
 
@@ -19,7 +19,7 @@ export class HoudiniClient {
         this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
         if (this.auth.type === "x402") {
-            this.fetchFn = createX402Fetch(this.auth.privateKey);
+            this.fetchFn = createX402Fetch({ evm: this.auth.privateKey, svm: this.auth.svmPrivateKey });
         } else {
             this.fetchFn = fetch;
         }
@@ -218,9 +218,9 @@ const paymentRequiredMessage = (authType?: HoudiniAuth["type"], reason?: string)
         // and an empty wallet produced the same "go fund your wallet" advice —
         // which sent me to check a wallet that was already funded.
         const why = reason ? ` Facilitator reason: ${reason}.` : "";
-        return `HTTP 402: payment was attempted but not accepted.${why} Check that the x402 wallet holds USDC on Base (${USDC_BASE}) — USDC on any other chain cannot pay for this API.`;
+        return `HTTP 402: payment was attempted but not accepted.${why} Check that the x402 wallet holds USDC on Base (${USDC_BASE}), or USDC on Solana (${USDC_SOLANA}) for a Solana key — USDC on any other chain cannot pay for this API.`;
     }
-    return "HTTP 402: this endpoint is pay-per-call and no payment method is configured. Set HOUDINI_X402_PRIVATE_KEY to the private key of a wallet holding USDC on Base, or authenticate with HOUDINI_API_KEY.";
+    return "HTTP 402: this endpoint is pay-per-call and no payment method is configured. Set HOUDINI_X402_PRIVATE_KEY to the private key of a wallet holding USDC on Base, or HOUDINI_X402_SVM_PRIVATE_KEY to a Solana wallet holding USDC on Solana, or authenticate with HOUDINI_API_KEY.";
 };
 
 export class HoudiniApiError extends Error {

@@ -463,7 +463,7 @@ recognise one if you see it.
 
 ## x402 Costs
 
-This agent pays per API request with USDC on Base:
+This agent pays per API request with USDC on Base or Solana (whichever wallet it was given):
 
 | Operation | Cost |
 |-----------|------|

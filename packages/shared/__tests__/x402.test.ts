@@ -16,6 +16,20 @@ vi.mock("@x402/evm/exact/client", () => ({
     registerExactEvmScheme: vi.fn(),
 }));
 
+vi.mock("@x402/svm/exact/client", () => ({
+    registerExactSvmScheme: vi.fn(),
+}));
+
+// Base58 decoding stays real (isSvmSecretKey depends on it); only the signer is
+// faked, since a made-up key would fail kit's keypair check.
+vi.mock("@solana/kit", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@solana/kit")>()),
+    createKeyPairSignerFromBytes: vi.fn(async () => ({ address: "SolanaPayer" })),
+}));
+
+// The offer each payment was signed for, in order.
+const signedRequirements: Array<Record<string, unknown>> = [];
+
 // What the server offers in its 402 challenge. Tests override it to model a
 // hostile server.
 let paymentRequirements: Array<Record<string, unknown>> = [
@@ -60,6 +74,7 @@ vi.mock("@x402/core/client", () => ({
                 }
             }
 
+            signedRequirements.push(selectedRequirements);
             const id = ++paymentSeq;
             activePayments += 1;
             maxConcurrentPayments = Math.max(maxConcurrentPayments, activePayments);
@@ -77,13 +92,16 @@ vi.mock("@x402/core/client", () => ({
     },
 }));
 
-const { createX402Fetch } = await import("../src/x402.js");
+const { createX402Fetch, isSvmSecretKey } = await import("../src/x402.js");
+const { registerExactSvmScheme } = await import("@x402/svm/exact/client");
+const { createKeyPairSignerFromBytes } = await import("@solana/kit");
 
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
 beforeEach(() => {
     paymentEvents.length = 0;
+    signedRequirements.length = 0;
     paymentSeq = 0;
     activePayments = 0;
     maxConcurrentPayments = 0;
@@ -470,5 +488,122 @@ describe("signing is bounded too", () => {
         const second = f("https://api.test/after").then((r) => r.status, (e: Error) => e.message);
         await vi.advanceTimersByTimeAsync(120_000);
         expect(await second).toBe(200);
+    });
+});
+
+describe("Solana", () => {
+    const EVM_KEY = `0x${"11".repeat(32)}` as const;
+    // base58 of 64 bytes of 0x07 — shaped like a Phantom export.
+    const SVM_KEY = "99eUso3aSbE9tqGSTXzo3TLfKb9RkMTURrHKQ1K7Zh3BbeqPevr5E1iCbpTjqHuTFLtfxTTD5ekfVuZFzQyEQf8";
+
+    const solana = (over: Record<string, unknown> = {}) => ({
+        scheme: "exact",
+        network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        amount: "100",
+        asset: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        payTo: "Bdg25JW8RBHKeq5YDWDrbH5Q2H8GaZFwqD6G4zPn2P2x",
+        ...over,
+    });
+    const base = (over: Record<string, unknown> = {}) => ({
+        scheme: "exact",
+        network: "eip155:8453",
+        amount: "100",
+        asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        payTo: "0xe2FBF4e7F29Ad53F0D28BCbCF4088277C9916eAC",
+        ...over,
+    });
+
+    const attempt = async (keys: Parameters<typeof createX402Fetch>[0], offers: Array<Record<string, unknown>>) => {
+        paymentRequirements = offers;
+        mockFetch.mockReset();
+        mockFetch.mockImplementation(async (_u: string, init?: RequestInit) => {
+            const paid = Boolean((init?.headers as Record<string, string>)?.["x-payment"]);
+            return new Response("{}", { status: paid ? 200 : 402 });
+        });
+        const f = createX402Fetch(keys);
+        try {
+            const res = await f("https://api.test/x");
+            return res.status === 200 ? "SIGNED" : `status ${res.status}`;
+        } catch (err) {
+            return `REFUSED: ${(err as Error).message}`;
+        }
+    };
+
+    it("pays a USDC-on-Solana offer with a Solana key", async () => {
+        expect(await attempt({ svm: SVM_KEY }, [solana()])).toBe("SIGNED");
+        expect(signedRequirements.at(-1)?.network).toBe("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp");
+    });
+
+    it("picks Solana out of a Base-and-Solana 402 when it only has a Solana key", async () => {
+        expect(await attempt({ svm: SVM_KEY }, [base(), solana()])).toBe("SIGNED");
+        expect(signedRequirements.at(-1)?.network).toBe("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp");
+    });
+
+    it("refuses a Base offer when it only has a Solana key", async () => {
+        expect(await attempt({ svm: SVM_KEY }, [base()])).toMatch(/REFUSED/);
+    });
+
+    it("still refuses a Solana offer with only an EVM key", async () => {
+        expect(await attempt(EVM_KEY, [solana()])).toMatch(/REFUSED/);
+    });
+
+    it("with both keys, pays on the first network the server offers", async () => {
+        expect(await attempt({ evm: EVM_KEY, svm: SVM_KEY }, [base(), solana()])).toBe("SIGNED");
+        expect(signedRequirements.at(-1)?.network).toBe("eip155:8453");
+        expect(await attempt({ evm: EVM_KEY, svm: SVM_KEY }, [solana(), base()])).toBe("SIGNED");
+        expect(signedRequirements.at(-1)?.network).toBe("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp");
+    });
+
+    it("refuses another token on Solana", async () => {
+        // USDT on Solana.
+        expect(await attempt({ svm: SVM_KEY }, [solana({ asset: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB" })])).toMatch(/REFUSED/);
+    });
+
+    it("matches the Solana mint exactly, since base58 is case-sensitive", async () => {
+        expect(await attempt({ svm: SVM_KEY }, [solana({ asset: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".toLowerCase() })])).toMatch(/REFUSED/);
+    });
+
+    it("refuses another Solana cluster", async () => {
+        // Devnet.
+        expect(await attempt({ svm: SVM_KEY }, [solana({ network: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1" })])).toMatch(/REFUSED/);
+    });
+
+    it("caps Solana payments like Base ones", async () => {
+        expect(await attempt({ svm: SVM_KEY }, [solana({ amount: "1000000000" })])).toMatch(/REFUSED/);
+    });
+
+    it("registers the Solana scheme for mainnet only", async () => {
+        vi.mocked(registerExactSvmScheme).mockClear();
+        await attempt({ svm: SVM_KEY }, [solana()]);
+        expect(registerExactSvmScheme).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ networks: ["solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"] }),
+        );
+    });
+
+    it("needs at least one key", () => {
+        expect(() => createX402Fetch({})).toThrow(/EVM key, a Solana key, or both/);
+    });
+
+    // The signer is built asynchronously. If loading it fails, that must fail
+    // the payment, not surface as an unhandled rejection that kills the process.
+    it("fails the payment, not the process, when the Solana key cannot load", async () => {
+        vi.mocked(createKeyPairSignerFromBytes).mockRejectedValueOnce(new Error("bad keypair"));
+        expect(await attempt({ svm: SVM_KEY }, [solana()])).toMatch(/REFUSED: bad keypair/);
+    });
+});
+
+describe("isSvmSecretKey", () => {
+    it("accepts a base58 64-byte secret key", () => {
+        expect(isSvmSecretKey("99eUso3aSbE9tqGSTXzo3TLfKb9RkMTURrHKQ1K7Zh3BbeqPevr5E1iCbpTjqHuTFLtfxTTD5ekfVuZFzQyEQf8")).toBe(true);
+    });
+
+    it.each([
+        ["a 32-byte public key", "Bdg25JW8RBHKeq5YDWDrbH5Q2H8GaZFwqD6G4zPn2P2x"],
+        ["an EVM key", `0x${"11".repeat(32)}`],
+        ["characters outside base58", "0OIl".repeat(22)],
+        ["an empty string", ""],
+    ])("rejects %s", (_label, value) => {
+        expect(isSvmSecretKey(value)).toBe(false);
     });
 });
