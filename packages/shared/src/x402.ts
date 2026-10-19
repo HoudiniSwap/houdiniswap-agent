@@ -4,7 +4,7 @@ import { registerExactEvmScheme } from "@x402/evm/exact/client";
 import { registerExactSvmScheme } from "@x402/svm/exact/client";
 import { privateKeyToAccount } from "viem/accounts";
 import { BASE_NETWORK, SOLANA_NETWORK, USDC_BASE, USDC_SOLANA } from "./constants.js";
-import type { X402Network } from "./types.js";
+import type { X402Network, X402Payment } from "./types.js";
 
 /** The wallets x402 pays from. At least one is required. */
 export interface X402Keys {
@@ -65,6 +65,8 @@ export interface X402Options {
      * used, which puts Base first. Ignored when there is no key for it.
      */
     preferredNetwork?: X402Network;
+    /** Called after each paid request that succeeded. An error it throws is ignored. */
+    onPayment?: (payment: X402Payment) => void;
 }
 
 /**
@@ -202,6 +204,44 @@ export const createX402Fetch = (keys: `0x${string}` | X402Keys, options: X402Opt
 
     const httpClient = new x402HTTPClient(client);
 
+    // The facilitator's reason travels in the fresh challenge's `error`.
+    const refusalReason = (res: Response): string | undefined => {
+        try {
+            return httpClient.getPaymentRequiredResponse((name: string) => res.headers.get(name), undefined).error;
+        } catch {
+            return undefined;
+        }
+    };
+
+    // The receipt names the payer and the transaction but not the amount
+    // (it does only for schemes that settle less than authorised), so that
+    // comes from the offer that was signed. Reporting is best-effort: the call
+    // has already been paid for and must not fail over it.
+    const reportPayment = (
+        accepted: PaymentRequirement | undefined,
+        res: Response,
+        refused: X402Payment["refused"],
+    ): void => {
+        if (!options.onPayment || !accepted?.network) return;
+        let receipt: { payer?: string; transaction?: string; amount?: string } = {};
+        try {
+            receipt = httpClient.getPaymentSettleResponse((name: string) => res.headers.get(name));
+        } catch {
+            // No readable receipt: report what was signed.
+        }
+        try {
+            options.onPayment({
+                network: accepted.network,
+                amount: receipt.amount ?? accepted.amount ?? "0",
+                ...(receipt.payer && { payer: receipt.payer }),
+                ...(receipt.transaction && { transaction: receipt.transaction }),
+                refused,
+            });
+        } catch {
+            // Ignored, as documented.
+        }
+    };
+
     let lastPaymentTime = 0;
     const MIN_PAYMENT_INTERVAL_MS = 5000;
     const PAYMENT_TIMEOUT_MS = 60_000;
@@ -294,6 +334,7 @@ export const createX402Fetch = (keys: `0x${string}` | X402Keys, options: X402Opt
             let required = paymentRequired;
             let payload = await sign(required);
             let paid = await submit(payload);
+            const refused: X402Payment["refused"] = [];
 
             // With keys for two networks, a payment refused before settlement
             // (an empty wallet, most often) gets a turn on the other one. Each
@@ -303,7 +344,10 @@ export const createX402Fetch = (keys: `0x${string}` | X402Keys, options: X402Opt
                 const others = tried
                     ? required.accepts.filter((r) => r.network !== tried && targets.some((t) => isTarget(r, t)))
                     : [];
-                if (others.length === 0 || !refusedBeforeSettlement(paid, payload.accepted)) return paid;
+                if (others.length === 0 || !refusedBeforeSettlement(paid, payload.accepted)) {
+                    if (paid.ok) reportPayment(payload.accepted, paid, refused);
+                    return paid;
+                }
 
                 required = { ...required, accepts: others };
                 try {
@@ -313,6 +357,7 @@ export const createX402Fetch = (keys: `0x${string}` | X402Keys, options: X402Opt
                     // other one could not be signed.
                     return paid;
                 }
+                refused.push({ network: tried as string, reason: refusalReason(paid) });
                 await paid.body?.cancel().catch(() => {});
                 paid = await submit(payload);
             }

@@ -21,7 +21,7 @@ export class HoudiniClient {
         if (this.auth.type === "x402") {
             this.fetchFn = createX402Fetch(
                 { evm: this.auth.privateKey, svm: this.auth.svmPrivateKey },
-                { preferredNetwork: this.auth.network },
+                { preferredNetwork: this.auth.network, onPayment: config.onPayment },
             );
         } else {
             this.fetchFn = fetch;

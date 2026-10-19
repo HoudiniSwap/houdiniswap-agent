@@ -19,6 +19,9 @@ no SOL needed, the facilitator pays the network fee.
 > Use a wallet funded with only what you intend to spend. The private key is stored on the machine
 > running the server and signs payments automatically.
 
+Each paid tool result ends with a line naming the amount, the network, the paying wallet and an
+explorer link to the transaction, and the network that refused first if the other key had to pay.
+
 ## Claude Code
 
 ```

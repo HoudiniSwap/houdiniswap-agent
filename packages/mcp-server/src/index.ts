@@ -4,6 +4,7 @@ import { SigningServer } from "./signing/server.js";
 import { HoudiniClient } from "@houdiniswap/agent-shared";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { getAuthConfig } from "./auth.js";
+import { recordPayment } from "./payments.js";
 
 const main = async () => {
     const baseUrl = process.env.HOUDINI_API_URL;
@@ -13,6 +14,7 @@ const main = async () => {
     const client = new HoudiniClient({
         baseUrl,
         auth: getAuthConfig(),
+        onPayment: recordPayment,
     });
 
     const server = createMcpServer(client);

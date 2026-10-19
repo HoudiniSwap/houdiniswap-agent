@@ -3,6 +3,22 @@ export interface HoudiniConfig {
     auth: HoudiniAuth;
     /** Ceiling on any single request, in ms. Defaults to 30000. */
     timeoutMs?: number;
+    /** x402 only: called after each paid request that succeeded, with what was paid and from where. */
+    onPayment?: (payment: X402Payment) => void;
+}
+
+/** One x402 payment, as the API's receipt reports it. */
+export interface X402Payment {
+    /** The network that paid, in CAIP-2 (`eip155:8453`, `solana:5eykt…`). */
+    network: string;
+    /** In USDC atomic units (6 decimals). */
+    amount: string;
+    /** The wallet that paid, as the facilitator reports it. */
+    payer?: string;
+    /** The settlement transaction: a hash on Base, a signature on Solana. */
+    transaction?: string;
+    /** Networks tried first that refused before settling, so nothing was charged on them. */
+    refused: Array<{ network: string; reason?: string }>;
 }
 
 /** A network x402 can pay on: USDC on Base or USDC on Solana. */

@@ -153,6 +153,8 @@ None is strictly required — the server starts without any of them, but every t
 
 **Paid calls are spaced ~5 seconds apart.** The facilitator settles each payment on-chain and two settlements at once from the same wallet fail, so the client serialises them. A full swap flow takes 20-30 seconds; a single call that seems to hang for 5s is doing this, not stalling. Individual payments time out after 60s.
 
+**Every paid tool result says what it cost and who paid.** It ends with a line such as `x402 payment for this call: 0.0001 USDC on Solana from <wallet>, transaction https://solscan.io/tx/<signature>.`, plus the network that refused first when the other key had to pay. Ask the agent where a fee came from and it answers from that line.
+
 ## Development
 
 ```bash
