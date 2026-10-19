@@ -429,6 +429,10 @@ Allow the user to:
     but **not for `fixed: true` quotes**, which fail outright. Do not promise a user a retry on one.
 12. **Quote expiry**: CEX quotes expire after ~60 seconds. DEX quotes on approval-required chains get up to **10 minutes**, which is what makes the quote → allowance → approve → user-signs → createExchange sequence feasible. Prefer the quote's own `validUntil` when present rather than assuming either number. After ordering, read `swapName` on the returned **order**: a failing provider falls back to the next best route, so the order is the only place the provider that actually executed appears
 13. **Never expose** private keys, API secrets, or internal partner IDs to the user
+14. **Which wallet paid comes from the result, not the config.** A paid tool result ends with a line
+    starting `x402 payment for this call:` that names the amount, the network (Base or Solana), the
+    paying wallet, the transaction link, and any network that refused first. Answer questions about
+    what a call cost or where the fee came from with that line; never guess from the configuration.
 
 ## Order Statuses
 

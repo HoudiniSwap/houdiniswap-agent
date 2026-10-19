@@ -13,6 +13,7 @@ import { registerSwapFlowTool } from "./tools/swap-flow.js";
 import { registerSigningTools } from "./tools/sign.js";
 import type { SigningServer } from "./signing/server.js";
 import { registerResources } from "./resources/openapi.js";
+import { withPaymentReceipts } from "./payments.js";
 
 // Read from package.json rather than hardcoding: this is the version MCP clients
 // display, and it had been stuck at 0.1.0 across every release since.
@@ -34,6 +35,13 @@ export const createMcpServer = (client: HoudiniClient, options: McpServerOptions
         name: "houdiniswap",
         version,
     });
+
+    // Every tool reports what it paid. Wrapping registration covers each tool,
+    // including ones added later, without touching their handlers. The handler
+    // is always the last argument, whichever overload is used.
+    const registerTool = server.tool.bind(server) as (...args: unknown[]) => ReturnType<McpServer["tool"]>;
+    server.tool = ((...args: unknown[]) =>
+        registerTool(...args.slice(0, -1), withPaymentReceipts(args.at(-1) as never))) as McpServer["tool"];
 
     // Register all tools
     registerTokenTools(server, client);
