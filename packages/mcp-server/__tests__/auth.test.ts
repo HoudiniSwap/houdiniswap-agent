@@ -5,6 +5,7 @@ const AUTH_VARS = [
     "HOUDINI_API_KEY",
     "HOUDINI_X402_PRIVATE_KEY",
     "HOUDINI_X402_SVM_PRIVATE_KEY",
+    "HOUDINI_X402_NETWORK",
     "HOUDINI_PARTNER_ID",
 ] as const;
 
@@ -176,6 +177,48 @@ describe("getAuthConfig", () => {
             process.env.HOUDINI_API_KEY = "partner:secret";
             process.env.HOUDINI_X402_SVM_PRIVATE_KEY = VALID_SVM_KEY;
             expect(getAuthConfig()).toEqual({ type: "apiKey", key: "partner:secret" });
+        });
+    });
+
+    describe("HOUDINI_X402_NETWORK", () => {
+        const bothKeys = () => {
+            process.env.HOUDINI_X402_PRIVATE_KEY = VALID_KEY;
+            process.env.HOUDINI_X402_SVM_PRIVATE_KEY = VALID_SVM_KEY;
+        };
+
+        it.each([
+            ["solana", "solana"],
+            ["base", "base"],
+            [" Solana ", "solana"],
+            ["BASE", "base"],
+        ])("passes %j through with both keys", (value, network) => {
+            bothKeys();
+            process.env.HOUDINI_X402_NETWORK = value;
+            expect(getAuthConfig()).toEqual({ type: "x402", privateKey: VALID_KEY, svmPrivateKey: VALID_SVM_KEY, network });
+            expect(console.error).not.toHaveBeenCalled();
+        });
+
+        it("warns about and ignores an unknown network", () => {
+            bothKeys();
+            process.env.HOUDINI_X402_NETWORK = "ethereum";
+            expect(getAuthConfig()).toEqual({ type: "x402", privateKey: VALID_KEY, svmPrivateKey: VALID_SVM_KEY });
+            expect(console.error).toHaveBeenCalledWith(expect.stringContaining("HOUDINI_X402_NETWORK"));
+        });
+
+        it.each([["empty", ""], ["the unexpanded placeholder", "${user_config.x402_network}"]])(
+            "ignores it silently when %s",
+            (_label, value) => {
+                bothKeys();
+                process.env.HOUDINI_X402_NETWORK = value;
+                expect(getAuthConfig()).toEqual({ type: "x402", privateKey: VALID_KEY, svmPrivateKey: VALID_SVM_KEY });
+                expect(console.error).not.toHaveBeenCalled();
+            },
+        );
+
+        it("is left out with a single key, which pays regardless", () => {
+            process.env.HOUDINI_X402_PRIVATE_KEY = VALID_KEY;
+            process.env.HOUDINI_X402_NETWORK = "solana";
+            expect(getAuthConfig()).toEqual({ type: "x402", privateKey: VALID_KEY });
         });
     });
 });

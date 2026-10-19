@@ -18,7 +18,7 @@ HoudiniSwap aggregates 14 CEXes and 20+ DEXes across multiple blockchains. This 
 
 ### With x402 (no signup needed)
 
-Pay per request with USDC on Base or Solana. No API key registration required. To pay on Solana, set `HOUDINI_X402_SVM_PRIVATE_KEY` (the base58 key Phantom or Solflare export) instead of, or as well as, the EVM key below.
+Pay per request with USDC on Base or Solana. No API key registration required. To pay on Solana, set `HOUDINI_X402_SVM_PRIVATE_KEY` (the base58 key Phantom or Solflare export) instead of, or as well as, the EVM key below. With both keys, set `HOUDINI_X402_NETWORK=solana` to pay on Solana first; a payment refused on one network is retried on the other.
 
 **Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
 ```json
@@ -142,7 +142,8 @@ The x402 protocol enables pay-per-request API access with USDC on Base or Solana
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `HOUDINI_X402_PRIVATE_KEY` | One of these | — | EVM wallet private key for x402 payments in USDC on Base |
-| `HOUDINI_X402_SVM_PRIVATE_KEY` | One of these | — | Solana secret key (base58) for x402 payments in USDC on Solana. With both x402 keys, the network the API offers first (Base) is used |
+| `HOUDINI_X402_SVM_PRIVATE_KEY` | One of these | — | Solana secret key (base58) for x402 payments in USDC on Solana |
+| `HOUDINI_X402_NETWORK` | No | `base` | With both x402 keys, the network paid on first: `base` or `solana`. A payment refused there (an empty wallet, for example) is retried on the other |
 | `HOUDINI_API_KEY` | One of these | — | Partner API key (`id:secret`) |
 | `HOUDINI_PARTNER_ID` | One of these | — | Public partner ID (read-only access) |
 | `HOUDINI_API_URL` | No | `https://api-partner.houdiniswap.com/v2` | API base URL |

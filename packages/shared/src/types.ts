@@ -5,13 +5,17 @@ export interface HoudiniConfig {
     timeoutMs?: number;
 }
 
+/** A network x402 can pay on: USDC on Base or USDC on Solana. */
+export type X402Network = "base" | "solana";
+
 /**
  * x402 pays per call from `privateKey` (EVM, USDC on Base), `svmPrivateKey`
- * (Solana secret key in base58, USDC on Solana), or both.
+ * (Solana secret key in base58, USDC on Solana), or both. With both, `network`
+ * picks the one tried first; without it, the API's order is used (Base first).
  */
 export type HoudiniAuth =
-    | { type: "x402"; privateKey: `0x${string}`; svmPrivateKey?: string }
-    | { type: "x402"; privateKey?: `0x${string}`; svmPrivateKey: string }
+    | { type: "x402"; privateKey: `0x${string}`; svmPrivateKey?: string; network?: X402Network }
+    | { type: "x402"; privateKey?: `0x${string}`; svmPrivateKey: string; network?: X402Network }
     | { type: "apiKey"; key: string }
     | { type: "partnerId"; id: string }
     | { type: "none" };

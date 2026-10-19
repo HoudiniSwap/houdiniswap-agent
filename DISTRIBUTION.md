@@ -60,7 +60,8 @@ No token, no manual step. The repo is public and the marketplace is Git-based, s
   `npx @houdiniswap/mcp-server` resolves to it — no rename needed.
 - The plugin prompts for the x402 keys via a `userConfig` block in `plugin.json` and passes them to
   the server as `HOUDINI_X402_PRIVATE_KEY` (EVM, pays on Base) and `HOUDINI_X402_SVM_PRIVATE_KEY`
-  (Solana, base58, optional). It is marked `sensitive`, so Claude Code masks the input and
+  (Solana, base58, optional), plus `HOUDINI_X402_NETWORK` (`base` or `solana`, optional) to pick the
+  network tried first when both are set. It is marked `sensitive`, so Claude Code masks the input and
   stores it outside `settings.json` — on Linux that is `~/.claude/.credentials.json`, mode 0600 and
   plaintext, not an OS keychain. Both `0x`-prefixed and bare 64-hex keys
   are accepted, since MetaMask exports without the prefix.

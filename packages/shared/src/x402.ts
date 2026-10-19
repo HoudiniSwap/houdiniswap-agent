@@ -4,6 +4,7 @@ import { registerExactEvmScheme } from "@x402/evm/exact/client";
 import { registerExactSvmScheme } from "@x402/svm/exact/client";
 import { privateKeyToAccount } from "viem/accounts";
 import { BASE_NETWORK, SOLANA_NETWORK, USDC_BASE, USDC_SOLANA } from "./constants.js";
+import type { X402Network } from "./types.js";
 
 /** The wallets x402 pays from. At least one is required. */
 export interface X402Keys {
@@ -36,6 +37,11 @@ const SOLANA_USDC: PaymentTarget = {
     label: `USDC on Solana (${USDC_SOLANA})`,
 };
 
+const NETWORK_TARGETS: Record<X402Network, PaymentTarget> = { base: BASE_USDC, solana: SOLANA_USDC };
+
+/** Whether `value` names a network x402 can pay on (`base` or `solana`). */
+export const isX402Network = (value: string): value is X402Network => value === "base" || value === "solana";
+
 // An EVM address is the same in any casing; a Solana mint is base58, where
 // casing is part of the address.
 const isTarget = (r: PaymentRequirement | undefined, t: PaymentTarget): boolean =>
@@ -54,6 +60,11 @@ const DEFAULT_MAX_PAYMENT_ATOMIC = 100_000n;
 export interface X402Options {
     /** Ceiling per payment in USDC atomic units. Defaults to 100_000 ($0.10). */
     maxPaymentAtomic?: bigint;
+    /**
+     * With both keys, the network tried first. Without it the API's order is
+     * used, which puts Base first. Ignored when there is no key for it.
+     */
+    preferredNetwork?: X402Network;
 }
 
 /**
@@ -98,15 +109,24 @@ const describe = (r?: PaymentRequirement): string =>
 
 /**
  * A `fetch` that pays for 402 responses. A bare `0x` key pays on Base, as
- * before; `{ evm, svm }` pays with whichever wallets are given. With both, the
- * first network the server offers wins — it lists Base first.
+ * before; `{ evm, svm }` pays with whichever wallets are given. With both,
+ * `preferredNetwork` is tried first, or else the first network the server
+ * offers (it lists Base first), and a payment refused there is retried once on
+ * the other network.
  */
 export const createX402Fetch = (keys: `0x${string}` | X402Keys, options: X402Options = {}): typeof fetch => {
     const { evm, svm } = typeof keys === "string" ? { evm: keys, svm: undefined } : keys;
     if (!evm && !svm) throw new Error("createX402Fetch needs an EVM key, a Solana key, or both");
 
     const maxPaymentAtomic = options.maxPaymentAtomic ?? DEFAULT_MAX_PAYMENT_ATOMIC;
-    const client = new x402Client();
+    const preferred = options.preferredNetwork ? NETWORK_TARGETS[options.preferredNetwork] : undefined;
+    // Runs after the policy, so it only chooses among offers this client would
+    // pay anyway. The library's default is the first offer.
+    const client = new x402Client(
+        ((_version: number, requirements: PaymentRequirement[]) =>
+            (preferred && requirements.find((r) => isTarget(r, preferred))) ||
+            requirements[0]) as unknown as ConstructorParameters<typeof x402Client>[0],
+    );
     const targets: PaymentTarget[] = [];
 
     if (evm) {
@@ -114,15 +134,22 @@ export const createX402Fetch = (keys: `0x${string}` | X402Keys, options: X402Opt
         targets.push(BASE_USDC);
     }
 
-    // The Solana signer is built asynchronously, so payments wait for it. The
-    // catch only keeps a bad key from crashing the process as an unhandled
-    // rejection before anything is paid; the payment that awaits it still fails.
+    // The Solana signer is built asynchronously, so payments wait for it. A key
+    // that fails to load leaves the Solana scheme unregistered: Base keeps
+    // paying when there is an EVM key, and with only the Solana key the payment
+    // fails with the load error. Catching here also keeps a bad key from
+    // crashing the process as an unhandled rejection.
+    let svmError: unknown;
     const svmReady = svm
-        ? createKeyPairSignerFromBytes(getBase58Encoder().encode(svm)).then((signer) => {
-              registerExactSvmScheme(client, { signer, networks: [SOLANA_NETWORK] });
-          })
+        ? createKeyPairSignerFromBytes(getBase58Encoder().encode(svm)).then(
+              (signer) => {
+                  registerExactSvmScheme(client, { signer, networks: [SOLANA_NETWORK] });
+              },
+              (err: unknown) => {
+                  svmError = err;
+              },
+          )
         : Promise.resolve();
-    svmReady.catch(() => {});
     if (svm) targets.push(SOLANA_USDC);
 
     client.registerPolicy(
@@ -206,6 +233,7 @@ export const createX402Fetch = (keys: `0x${string}` | X402Keys, options: X402Opt
             }
 
             await svmReady;
+            if (svmError !== undefined && !evm) throw svmError;
 
             const paymentRequired = httpClient.getPaymentRequiredResponse(
                 (name: string) => res.headers.get(name),
@@ -214,31 +242,58 @@ export const createX402Fetch = (keys: `0x${string}` | X402Keys, options: X402Opt
 
             // Signing can stall on the facilitator just as the retry can, so both
             // are bounded.
-            const payload = await withTimeout(
-                client.createPaymentPayload(paymentRequired),
-                "signing the payment",
-            );
-            const paymentHeaders = httpClient.encodePaymentSignatureHeader(payload);
+            const sign = (required: typeof paymentRequired) =>
+                withTimeout(client.createPaymentPayload(required), "signing the payment");
 
-            // Aborting actually closes the socket; the race alone would leave it
-            // open and still consuming a connection.
-            const controller = new AbortController();
-            try {
-                return await withTimeout(
-                    fetch(url, {
-                        ...init,
-                        headers: { ...init?.headers, ...paymentHeaders },
-                        signal: controller.signal,
-                    }),
-                    "submitting the paid request",
-                );
-            } catch (err) {
-                controller.abort();
-                throw err;
-            } finally {
-                // After the retry resolves, so the next payment waits out this
-                // settlement rather than starting the clock at signing time.
-                lastPaymentTime = Date.now();
+            const submit = async (payload: Awaited<ReturnType<typeof sign>>): Promise<Response> => {
+                const paymentHeaders = httpClient.encodePaymentSignatureHeader(payload);
+
+                // Aborting actually closes the socket; the race alone would leave it
+                // open and still consuming a connection.
+                const controller = new AbortController();
+                try {
+                    return await withTimeout(
+                        fetch(url, {
+                            ...init,
+                            headers: { ...init?.headers, ...paymentHeaders },
+                            signal: controller.signal,
+                        }),
+                        "submitting the paid request",
+                    );
+                } catch (err) {
+                    controller.abort();
+                    throw err;
+                } finally {
+                    // After the retry resolves, so the next payment waits out this
+                    // settlement rather than starting the clock at signing time.
+                    lastPaymentTime = Date.now();
+                }
+            };
+
+            let required = paymentRequired;
+            let payload = await sign(required);
+            let paid = await submit(payload);
+
+            // A 402 to a paid request means the payment was refused (an empty
+            // wallet, most often) and nothing was taken, so with keys for two
+            // networks the other one gets a turn. Each network is tried once.
+            for (;;) {
+                const tried = payload.accepted?.network;
+                const others = tried
+                    ? required.accepts.filter((r) => r.network !== tried && targets.some((t) => isTarget(r, t)))
+                    : [];
+                if (paid.status !== 402 || others.length === 0) return paid;
+
+                required = { ...required, accepts: others };
+                try {
+                    payload = await sign(required);
+                } catch {
+                    // Why the first network refused says more than why the
+                    // other one could not be signed.
+                    return paid;
+                }
+                await paid.body?.cancel().catch(() => {});
+                paid = await submit(payload);
             }
         });
 
