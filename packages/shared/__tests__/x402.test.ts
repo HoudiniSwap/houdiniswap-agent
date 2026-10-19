@@ -615,18 +615,30 @@ describe("Solana", () => {
         expect(signedNetworks()).toEqual(["eip155:8453"]);
     });
 
+    /**
+     * The 402s a paid request can get back, as `@x402/express` sends them:
+     * refused before settlement (a fresh challenge), settlement failed (a
+     * receipt), or settlement threw (bare).
+     */
+    const ANSWERS = {
+        refused: () => new Response("{}", { status: 402, headers: { "PAYMENT-REQUIRED": "e30=" } }),
+        settleFailed: () => new Response("{}", { status: 402, headers: { "PAYMENT-RESPONSE": "e30=" } }),
+        settleThrew: () => new Response("{}", { status: 402 }),
+    };
+    type Answer = keyof typeof ANSWERS | number;
+
     /** Answers each paid retry by the network it was signed for. */
     const paying = async (
         keys: Parameters<typeof createX402Fetch>[0],
         options: Parameters<typeof createX402Fetch>[1] = {},
-        answer: Record<string, number> = {},
+        answer: Record<string, Answer> = {},
     ) => {
         mockFetch.mockReset();
         mockFetch.mockImplementation(async (_u: string, init?: RequestInit) => {
             const id = (init?.headers as Record<string, string>)?.["x-payment"];
             if (!id) return new Response("{}", { status: 402 });
-            const network = String(signedRequirements[Number(id) - 1]?.network);
-            return new Response("{}", { status: answer[network] ?? 200 });
+            const a = answer[String(signedRequirements[Number(id) - 1]?.network)] ?? 200;
+            return typeof a === "number" ? new Response("{}", { status: a }) : ANSWERS[a]();
         });
         return (await createX402Fetch(keys, options)("https://api.test/x")).status;
     };
@@ -667,7 +679,7 @@ describe("Solana", () => {
     describe("fallback to the other network", () => {
         it("retries on Solana when the Base payment is refused", async () => {
             paymentRequirements = [base(), solana()];
-            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, {}, { "eip155:8453": 402 })).toBe(200);
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, {}, { "eip155:8453": "refused" })).toBe(200);
             expect(signedNetworks()).toEqual(["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"]);
         });
 
@@ -676,7 +688,7 @@ describe("Solana", () => {
             const status = await paying(
                 { evm: EVM_KEY, svm: SVM_KEY },
                 { preferredNetwork: "solana" },
-                { "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": 402 },
+                { "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": "refused" },
             );
             expect(status).toBe(200);
             expect(signedNetworks()).toEqual(["solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "eip155:8453"]);
@@ -687,7 +699,7 @@ describe("Solana", () => {
             const status = await paying(
                 { evm: EVM_KEY, svm: SVM_KEY },
                 {},
-                { "eip155:8453": 402, "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": 402 },
+                { "eip155:8453": "refused", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": "refused" },
             );
             expect(status).toBe(402);
             expect(signedNetworks()).toEqual(["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"]);
@@ -707,20 +719,59 @@ describe("Solana", () => {
 
         it("does not retry with only one key", async () => {
             paymentRequirements = [base(), solana()];
-            expect(await paying(EVM_KEY, {}, { "eip155:8453": 402 })).toBe(402);
+            expect(await paying(EVM_KEY, {}, { "eip155:8453": "refused" })).toBe(402);
             expect(signedNetworks()).toEqual(["eip155:8453"]);
         });
 
         it("does not retry on a network the API did not offer", async () => {
             paymentRequirements = [base()];
-            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, {}, { "eip155:8453": 402 })).toBe(402);
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, {}, { "eip155:8453": "refused" })).toBe(402);
             expect(signedNetworks()).toEqual(["eip155:8453"]);
         });
 
         it("returns the first refusal when the other offer is over the cap", async () => {
             paymentRequirements = [base(), solana({ amount: "1000000000" })];
-            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, {}, { "eip155:8453": 402 })).toBe(402);
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, {}, { "eip155:8453": "refused" })).toBe(402);
             expect(signedNetworks()).toEqual(["eip155:8453"]);
+        });
+    });
+
+    // Paying on the other network is only safe when the first payment cannot
+    // have been taken. Once settlement has started, it might have been.
+    describe("never pays twice", () => {
+        it("does not retry when settlement failed, since the transfer may have landed", async () => {
+            paymentRequirements = [base(), solana()];
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, {}, { "eip155:8453": "settleFailed" })).toBe(402);
+            expect(signedNetworks()).toEqual(["eip155:8453"]);
+        });
+
+        it("does not retry when settlement threw and the 402 says nothing", async () => {
+            paymentRequirements = [base(), solana()];
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, {}, { "eip155:8453": "settleThrew" })).toBe(402);
+            expect(signedNetworks()).toEqual(["eip155:8453"]);
+        });
+
+        it("does not retry when a refusal also carries a settlement receipt", async () => {
+            paymentRequirements = [base(), solana()];
+            mockFetch.mockReset();
+            mockFetch.mockImplementation(async (_u: string, init?: RequestInit) =>
+                (init?.headers as Record<string, string>)?.["x-payment"]
+                    ? new Response("{}", { status: 402, headers: { "PAYMENT-REQUIRED": "e30=", "PAYMENT-RESPONSE": "e30=" } })
+                    : new Response("{}", { status: 402 }));
+            expect((await createX402Fetch({ evm: EVM_KEY, svm: SVM_KEY })("https://api.test/x")).status).toBe(402);
+            expect(signedNetworks()).toEqual(["eip155:8453"]);
+        });
+
+        it("does not retry a payment flow that can settle before the handler", async () => {
+            paymentRequirements = [base({ extra: { paymentFlow: "upfront" } }), solana()];
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, {}, { "eip155:8453": "refused" })).toBe(402);
+            expect(signedNetworks()).toEqual(["eip155:8453"]);
+        });
+
+        it("retries an offer that names the authorization flow", async () => {
+            paymentRequirements = [base({ extra: { paymentFlow: "authorization" } }), solana()];
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, {}, { "eip155:8453": "refused" })).toBe(200);
+            expect(signedNetworks()).toEqual(["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"]);
         });
     });
 });

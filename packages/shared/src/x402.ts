@@ -108,11 +108,32 @@ const describe = (r?: PaymentRequirement): string =>
     r ? `${r.amount ?? "?"} of ${r.asset ?? "?"} on ${r.network ?? "?"} to ${r.payTo ?? "?"}` : "nothing";
 
 /**
+ * Whether a paid request was refused before the server tried to settle it, so
+ * paying again on another network cannot charge twice.
+ *
+ * In the authorization flow the server settles only after the handler has run.
+ * A payment refused before that (verification failed: no funds, a failed
+ * simulation) gets a fresh `PAYMENT-REQUIRED` challenge. A failed settlement
+ * answers with `PAYMENT-RESPONSE` instead, or with a bare 402 when it threw;
+ * either way the transfer may have gone through, so neither counts. Neither
+ * does any other flow, since those can settle before the handler.
+ */
+const refusedBeforeSettlement = (res: Response, accepted?: { extra?: Record<string, unknown> }): boolean => {
+    const flow = accepted?.extra?.paymentFlow;
+    return (
+        res.status === 402 &&
+        res.headers.has("payment-required") &&
+        !res.headers.has("payment-response") &&
+        (flow == null || flow === "authorization")
+    );
+};
+
+/**
  * A `fetch` that pays for 402 responses. A bare `0x` key pays on Base, as
  * before; `{ evm, svm }` pays with whichever wallets are given. With both,
  * `preferredNetwork` is tried first, or else the first network the server
- * offers (it lists Base first), and a payment refused there is retried once on
- * the other network.
+ * offers (it lists Base first), and a payment refused there before settlement
+ * is retried once on the other network.
  */
 export const createX402Fetch = (keys: `0x${string}` | X402Keys, options: X402Options = {}): typeof fetch => {
     const { evm, svm } = typeof keys === "string" ? { evm: keys, svm: undefined } : keys;
@@ -274,15 +295,15 @@ export const createX402Fetch = (keys: `0x${string}` | X402Keys, options: X402Opt
             let payload = await sign(required);
             let paid = await submit(payload);
 
-            // A 402 to a paid request means the payment was refused (an empty
-            // wallet, most often) and nothing was taken, so with keys for two
-            // networks the other one gets a turn. Each network is tried once.
+            // With keys for two networks, a payment refused before settlement
+            // (an empty wallet, most often) gets a turn on the other one. Each
+            // network is tried once, and only when nothing can have been taken.
             for (;;) {
                 const tried = payload.accepted?.network;
                 const others = tried
                     ? required.accepts.filter((r) => r.network !== tried && targets.some((t) => isTarget(r, t)))
                     : [];
-                if (paid.status !== 402 || others.length === 0) return paid;
+                if (others.length === 0 || !refusedBeforeSettlement(paid, payload.accepted)) return paid;
 
                 required = { ...required, accepts: others };
                 try {
