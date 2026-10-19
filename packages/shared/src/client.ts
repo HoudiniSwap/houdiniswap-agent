@@ -19,7 +19,10 @@ export class HoudiniClient {
         this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
         if (this.auth.type === "x402") {
-            this.fetchFn = createX402Fetch({ evm: this.auth.privateKey, svm: this.auth.svmPrivateKey });
+            this.fetchFn = createX402Fetch(
+                { evm: this.auth.privateKey, svm: this.auth.svmPrivateKey },
+                { preferredNetwork: this.auth.network },
+            );
         } else {
             this.fetchFn = fetch;
         }

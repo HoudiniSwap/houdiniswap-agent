@@ -12,12 +12,16 @@ vi.mock("viem/accounts", () => ({
     privateKeyToAccount: vi.fn(() => ({ address: "0xtest" })),
 }));
 
+// Registration is recorded on the client, because the real one only offers the
+// networks a scheme was registered for — that is what keeps a Solana key that
+// failed to load from being chosen.
 vi.mock("@x402/evm/exact/client", () => ({
-    registerExactEvmScheme: vi.fn(),
+    registerExactEvmScheme: vi.fn((client: { networks: string[] }) => client.networks.push("eip155:*")),
 }));
 
 vi.mock("@x402/svm/exact/client", () => ({
-    registerExactSvmScheme: vi.fn(),
+    registerExactSvmScheme: vi.fn((client: { networks: string[] }, { networks }: { networks: string[] }) =>
+        client.networks.push(...networks)),
 }));
 
 // Base58 decoding stays real (isSvmSecretKey depends on it); only the signer is
@@ -37,15 +41,22 @@ let paymentRequirements: Array<Record<string, unknown>> = [
 ];
 
 /**
- * Mirrors the real client's selection order — filter by policies, then run the
- * before-hooks, then sign — because that order is exactly what the spend guard
- * relies on. A mock that ignored policies would let the guard's tests pass while
- * the guard did nothing, which is the failure mode being guarded against.
+ * Mirrors the real client's selection order — keep the registered networks,
+ * filter by policies, pick with the selector, then run the before-hooks, then
+ * sign — because that order is exactly what the spend guard relies on. A mock
+ * that ignored policies would let the guard's tests pass while the guard did
+ * nothing, which is the failure mode being guarded against.
  */
 vi.mock("@x402/core/client", () => ({
     x402Client: class {
+        networks: string[] = [];
         policies: Array<(v: number, r: Array<Record<string, unknown>>) => Array<Record<string, unknown>>> = [];
         beforeHooks: Array<(c: { selectedRequirements: unknown }) => Promise<void | { abort: true; reason: string }>> = [];
+        selector: (v: number, r: Array<Record<string, unknown>>) => Record<string, unknown>;
+
+        constructor(selector?: (v: number, r: Array<Record<string, unknown>>) => Record<string, unknown>) {
+            this.selector = selector ?? ((_v, r) => r[0]);
+        }
 
         registerPolicy(policy: (v: number, r: Array<Record<string, unknown>>) => Array<Record<string, unknown>>) {
             this.policies.push(policy);
@@ -59,14 +70,16 @@ vi.mock("@x402/core/client", () => ({
 
         async createPaymentPayload(paymentRequired: { accepts?: Array<Record<string, unknown>> }) {
             if (stallSigning) await new Promise(() => {});
-            let candidates = paymentRequired?.accepts ?? [];
+            let candidates = (paymentRequired?.accepts ?? []).filter((r) =>
+                this.networks.some((n) => n === r.network || (n === "eip155:*" && String(r.network).startsWith("eip155:"))));
+            if (candidates.length === 0) throw new Error("No network/scheme registered");
             for (const policy of this.policies) {
                 candidates = policy(2, candidates);
                 if (candidates.length === 0) {
                     throw new Error("All payment requirements were filtered out by policies");
                 }
             }
-            const selectedRequirements = candidates[0];
+            const selectedRequirements = this.selector(2, candidates);
             for (const hook of this.beforeHooks) {
                 const result = await hook({ selectedRequirements });
                 if (result && "abort" in result && result.abort) {
@@ -79,7 +92,7 @@ vi.mock("@x402/core/client", () => ({
             activePayments += 1;
             maxConcurrentPayments = Math.max(maxConcurrentPayments, activePayments);
             paymentEvents.push({ id, phase: "sign", at: Date.now() });
-            return { id };
+            return { id, accepted: selectedRequirements };
         }
     },
     x402HTTPClient: class {
@@ -221,7 +234,9 @@ describe("createX402Fetch", () => {
 /**
  * Money-path invariant with no previous test: exactly one signed authorisation
  * per 402. Two payments for one logical call would require two calls to
- * createPaymentPayload, so pinning the count pins the property.
+ * createPaymentPayload, so pinning the count pins the property. The one
+ * exception is a client with keys for two networks, which signs once on each
+ * when the first is refused (see "fallback to the other network").
  *
  * This is what makes a timeout safe to add. A timeout cannot double-spend — it
  * can only lose a single payment if the facilitator settles after we stop
@@ -590,6 +605,174 @@ describe("Solana", () => {
     it("fails the payment, not the process, when the Solana key cannot load", async () => {
         vi.mocked(createKeyPairSignerFromBytes).mockRejectedValueOnce(new Error("bad keypair"));
         expect(await attempt({ svm: SVM_KEY }, [solana()])).toMatch(/REFUSED: bad keypair/);
+    });
+
+    it("keeps paying on Base when the Solana key cannot load next to an EVM key", async () => {
+        vi.mocked(createKeyPairSignerFromBytes).mockRejectedValueOnce(new Error("bad keypair"));
+        paymentRequirements = [solana(), base()];
+        const status = await paying({ evm: EVM_KEY, svm: SVM_KEY }, { preferredNetwork: "solana" });
+        expect(status).toBe(200);
+        expect(signedNetworks()).toEqual(["eip155:8453"]);
+    });
+
+    /**
+     * The 402s a paid request can get back, as `@x402/express` sends them:
+     * refused before settlement (a fresh challenge), settlement failed (a
+     * receipt), or settlement threw (bare).
+     */
+    const ANSWERS = {
+        refused: () => new Response("{}", { status: 402, headers: { "PAYMENT-REQUIRED": "e30=" } }),
+        settleFailed: () => new Response("{}", { status: 402, headers: { "PAYMENT-RESPONSE": "e30=" } }),
+        settleThrew: () => new Response("{}", { status: 402 }),
+    };
+    type Answer = keyof typeof ANSWERS | number;
+
+    /** Answers each paid retry by the network it was signed for. */
+    const paying = async (
+        keys: Parameters<typeof createX402Fetch>[0],
+        options: Parameters<typeof createX402Fetch>[1] = {},
+        answer: Record<string, Answer> = {},
+    ) => {
+        mockFetch.mockReset();
+        mockFetch.mockImplementation(async (_u: string, init?: RequestInit) => {
+            const id = (init?.headers as Record<string, string>)?.["x-payment"];
+            if (!id) return new Response("{}", { status: 402 });
+            const a = answer[String(signedRequirements[Number(id) - 1]?.network)] ?? 200;
+            return typeof a === "number" ? new Response("{}", { status: a }) : ANSWERS[a]();
+        });
+        return (await createX402Fetch(keys, options)("https://api.test/x")).status;
+    };
+    const signedNetworks = () => signedRequirements.map((r) => r.network);
+
+    describe("preferred network", () => {
+        it("pays on Solana first when asked, though the API lists Base first", async () => {
+            paymentRequirements = [base(), solana()];
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, { preferredNetwork: "solana" })).toBe(200);
+            expect(signedNetworks()).toEqual(["solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"]);
+        });
+
+        it("pays on Base first when asked, though the API lists Solana first", async () => {
+            paymentRequirements = [solana(), base()];
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, { preferredNetwork: "base" })).toBe(200);
+            expect(signedNetworks()).toEqual(["eip155:8453"]);
+        });
+
+        it("is ignored when there is no key for it", async () => {
+            paymentRequirements = [base(), solana()];
+            expect(await paying({ svm: SVM_KEY }, { preferredNetwork: "base" })).toBe(200);
+            expect(signedNetworks()).toEqual(["solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"]);
+        });
+
+        it("is ignored when the API does not offer it", async () => {
+            paymentRequirements = [base()];
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, { preferredNetwork: "solana" })).toBe(200);
+            expect(signedNetworks()).toEqual(["eip155:8453"]);
+        });
+
+        it("does not let a preferred network past the spend cap", async () => {
+            paymentRequirements = [base(), solana({ amount: "1000000000" })];
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, { preferredNetwork: "solana" })).toBe(200);
+            expect(signedNetworks()).toEqual(["eip155:8453"]);
+        });
+    });
+
+    describe("fallback to the other network", () => {
+        it("retries on Solana when the Base payment is refused", async () => {
+            paymentRequirements = [base(), solana()];
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, {}, { "eip155:8453": "refused" })).toBe(200);
+            expect(signedNetworks()).toEqual(["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"]);
+        });
+
+        it("retries on Base when the preferred Solana payment is refused", async () => {
+            paymentRequirements = [base(), solana()];
+            const status = await paying(
+                { evm: EVM_KEY, svm: SVM_KEY },
+                { preferredNetwork: "solana" },
+                { "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": "refused" },
+            );
+            expect(status).toBe(200);
+            expect(signedNetworks()).toEqual(["solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "eip155:8453"]);
+        });
+
+        it("signs once per network and returns the 402 when both refuse", async () => {
+            paymentRequirements = [base(), solana()];
+            const status = await paying(
+                { evm: EVM_KEY, svm: SVM_KEY },
+                {},
+                { "eip155:8453": "refused", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": "refused" },
+            );
+            expect(status).toBe(402);
+            expect(signedNetworks()).toEqual(["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"]);
+        });
+
+        it("does not retry when the payment went through", async () => {
+            paymentRequirements = [base(), solana()];
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY })).toBe(200);
+            expect(signedNetworks()).toEqual(["eip155:8453"]);
+        });
+
+        it("does not retry on another error status", async () => {
+            paymentRequirements = [base(), solana()];
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, {}, { "eip155:8453": 500 })).toBe(500);
+            expect(signedNetworks()).toEqual(["eip155:8453"]);
+        });
+
+        it("does not retry with only one key", async () => {
+            paymentRequirements = [base(), solana()];
+            expect(await paying(EVM_KEY, {}, { "eip155:8453": "refused" })).toBe(402);
+            expect(signedNetworks()).toEqual(["eip155:8453"]);
+        });
+
+        it("does not retry on a network the API did not offer", async () => {
+            paymentRequirements = [base()];
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, {}, { "eip155:8453": "refused" })).toBe(402);
+            expect(signedNetworks()).toEqual(["eip155:8453"]);
+        });
+
+        it("returns the first refusal when the other offer is over the cap", async () => {
+            paymentRequirements = [base(), solana({ amount: "1000000000" })];
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, {}, { "eip155:8453": "refused" })).toBe(402);
+            expect(signedNetworks()).toEqual(["eip155:8453"]);
+        });
+    });
+
+    // Paying on the other network is only safe when the first payment cannot
+    // have been taken. Once settlement has started, it might have been.
+    describe("never pays twice", () => {
+        it("does not retry when settlement failed, since the transfer may have landed", async () => {
+            paymentRequirements = [base(), solana()];
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, {}, { "eip155:8453": "settleFailed" })).toBe(402);
+            expect(signedNetworks()).toEqual(["eip155:8453"]);
+        });
+
+        it("does not retry when settlement threw and the 402 says nothing", async () => {
+            paymentRequirements = [base(), solana()];
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, {}, { "eip155:8453": "settleThrew" })).toBe(402);
+            expect(signedNetworks()).toEqual(["eip155:8453"]);
+        });
+
+        it("does not retry when a refusal also carries a settlement receipt", async () => {
+            paymentRequirements = [base(), solana()];
+            mockFetch.mockReset();
+            mockFetch.mockImplementation(async (_u: string, init?: RequestInit) =>
+                (init?.headers as Record<string, string>)?.["x-payment"]
+                    ? new Response("{}", { status: 402, headers: { "PAYMENT-REQUIRED": "e30=", "PAYMENT-RESPONSE": "e30=" } })
+                    : new Response("{}", { status: 402 }));
+            expect((await createX402Fetch({ evm: EVM_KEY, svm: SVM_KEY })("https://api.test/x")).status).toBe(402);
+            expect(signedNetworks()).toEqual(["eip155:8453"]);
+        });
+
+        it("does not retry a payment flow that can settle before the handler", async () => {
+            paymentRequirements = [base({ extra: { paymentFlow: "upfront" } }), solana()];
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, {}, { "eip155:8453": "refused" })).toBe(402);
+            expect(signedNetworks()).toEqual(["eip155:8453"]);
+        });
+
+        it("retries an offer that names the authorization flow", async () => {
+            paymentRequirements = [base({ extra: { paymentFlow: "authorization" } }), solana()];
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, {}, { "eip155:8453": "refused" })).toBe(200);
+            expect(signedNetworks()).toEqual(["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"]);
+        });
     });
 });
 

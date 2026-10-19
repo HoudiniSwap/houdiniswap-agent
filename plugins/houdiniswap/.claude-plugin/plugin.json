@@ -2,7 +2,7 @@
   "name": "houdiniswap",
   "displayName": "HoudiniSwap Swap Agent",
   "description": "Discover, quote, and execute crypto swaps across 14 CEXes and 20+ DEXes via HoudiniSwap, with x402 pay-per-call (USDC on Base or Solana — no signup).",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "author": {
     "name": "HoudiniSwap",
     "url": "https://houdiniswap.com"
@@ -29,8 +29,13 @@
     "x402_solana_private_key": {
       "type": "string",
       "title": "x402 Solana private key (optional)",
-      "description": "To pay with USDC on Solana: the base58 private key of a Solana wallet funded with USDC on Solana, as Phantom or Solflare export it. No SOL needed. If both keys are set, Base is used.",
+      "description": "To pay with USDC on Solana: the base58 private key of a Solana wallet funded with USDC on Solana, as Phantom or Solflare export it. No SOL needed. If both keys are set, Base is tried first unless the next field says solana.",
       "sensitive": true
+    },
+    "x402_network": {
+      "type": "string",
+      "title": "x402 network to pay on first (optional)",
+      "description": "Only used when both keys are set: base or solana. Leave empty for Base. If a payment is refused on that network (an empty wallet, for example), it is retried on the other one."
     }
   },
   "mcpServers": {
@@ -42,7 +47,8 @@
       ],
       "env": {
         "HOUDINI_X402_PRIVATE_KEY": "${user_config.x402_private_key}",
-        "HOUDINI_X402_SVM_PRIVATE_KEY": "${user_config.x402_solana_private_key}"
+        "HOUDINI_X402_SVM_PRIVATE_KEY": "${user_config.x402_solana_private_key}",
+        "HOUDINI_X402_NETWORK": "${user_config.x402_network}"
       }
     }
   }

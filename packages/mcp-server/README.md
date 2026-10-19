@@ -75,7 +75,8 @@ tool-result limit.
 | Variable | Description |
 |---|---|
 | `HOUDINI_X402_PRIVATE_KEY` | EVM key for x402 payments in USDC on Base. Accepted with or without the `0x` prefix. |
-| `HOUDINI_X402_SVM_PRIVATE_KEY` | Solana secret key for x402 payments in USDC on Solana: the base58 string Phantom or Solflare export. With both x402 keys, Base is used. |
+| `HOUDINI_X402_SVM_PRIVATE_KEY` | Solana secret key for x402 payments in USDC on Solana: the base58 string Phantom or Solflare export. |
+| `HOUDINI_X402_NETWORK` | With both x402 keys, the network paid on first: `base` (default) or `solana`. A payment refused there is retried on the other. |
 | `HOUDINI_API_KEY` | Partner API key (`id:secret`), if you have one. Takes precedence. |
 | `HOUDINI_PARTNER_ID` | Public partner ID. |
 | `HOUDINI_API_URL` | API base URL. Defaults to the production partner API. |
