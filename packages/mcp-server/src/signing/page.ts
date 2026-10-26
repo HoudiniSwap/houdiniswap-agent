@@ -269,10 +269,12 @@ export const renderSignPage = (
       // The API gives value as a decimal string; eth_sendTransaction wants a
       // hex quantity. "0" is the same either way, which is why this survived
       // an ERC-20 approval and would have mis-sent a native-value swap.
+      // Hex is re-encoded too rather than passed through: Uniswap pads it to
+      // whole bytes ("0x0e35…"), and Phantom rejects a quantity with a leading
+      // zero as "Missing or invalid parameters".
       const toQuantity = (v) => {
         if (v === undefined || v === null || v === "") return "0x0";
-        const s = String(v);
-        return s.startsWith("0x") ? s : "0x" + BigInt(s).toString(16);
+        return "0x" + BigInt(String(v)).toString(16);
       };
       // "0x" rather than undefined: a native deposit carries no calldata, and
       // some wallets reject a transaction whose data field is missing outright.

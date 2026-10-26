@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { HoudiniClient, HoudiniApiError } from "../src/client.js";
+import { createX402Fetch } from "../src/x402.js";
 
 // Mock the x402 module to avoid importing real crypto libs in unit tests
 vi.mock("../src/x402.js", () => ({
@@ -20,6 +21,17 @@ beforeEach(() => {
 });
 
 describe("HoudiniClient", () => {
+    describe("x402", () => {
+        it("passes both keys and the preferred network to the paying fetch", () => {
+            const svmPrivateKey = "99eUso3aSbE9tqGSTXzo3TLfKb9RkMTURrHKQ1K7Zh3BbeqPevr5E1iCbpTjqHuTFLtfxTTD5ekfVuZFzQyEQf8";
+            new HoudiniClient({ auth: { type: "x402", privateKey: `0x${"11".repeat(32)}`, svmPrivateKey, network: "solana" } });
+            expect(createX402Fetch).toHaveBeenCalledWith(
+                { evm: `0x${"11".repeat(32)}`, svm: svmPrivateKey },
+                { preferredNetwork: "solana" },
+            );
+        });
+    });
+
     describe("base URL", () => {
         it("defaults to https://api-partner.houdiniswap.com/v2", async () => {
             mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }));

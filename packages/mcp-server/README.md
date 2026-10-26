@@ -1,7 +1,7 @@
 # @houdiniswap/mcp-server
 
 MCP server for [HoudiniSwap](https://houdini.com) — crypto swap aggregation across 14 CEXes and
-20+ DEXes, paid per call in USDC on Base via [x402](https://docs.cdp.coinbase.com/x402/welcome). No
+20+ DEXes, paid per call in USDC on Base or Solana via [x402](https://docs.cdp.coinbase.com/x402/welcome). No
 signup, no API key.
 
 ```bash
@@ -13,10 +13,14 @@ npx -y @houdiniswap/mcp-server
 Every tool costs money. `GET /status` is the only free endpoint and it is not exposed as a tool, so
 without a funded wallet **every call returns 402**. Fund an EVM wallet with a couple of dollars of
 **USDC on Base** — no ETH needed, payments are gasless EIP-3009 authorisations settled by the
-facilitator.
+facilitator. Or fund a Solana wallet with **USDC on Solana** and set `HOUDINI_X402_SVM_PRIVATE_KEY` —
+no SOL needed, the facilitator pays the network fee.
 
 > Use a wallet funded with only what you intend to spend. The private key is stored on the machine
 > running the server and signs payments automatically.
+
+Each paid tool result ends with a line naming the amount, the network, the paying wallet and an
+explorer link to the transaction, and the network that refused first if the other key had to pay.
 
 ## Claude Code
 
@@ -73,7 +77,9 @@ tool-result limit.
 
 | Variable | Description |
 |---|---|
-| `HOUDINI_X402_PRIVATE_KEY` | EVM key for x402 payments. Accepted with or without the `0x` prefix. |
+| `HOUDINI_X402_PRIVATE_KEY` | EVM key for x402 payments in USDC on Base. Accepted with or without the `0x` prefix. |
+| `HOUDINI_X402_SVM_PRIVATE_KEY` | Solana secret key for x402 payments in USDC on Solana: the base58 string Phantom or Solflare export. |
+| `HOUDINI_X402_NETWORK` | With both x402 keys, the network paid on first: `base` (default) or `solana`. A payment refused there is retried on the other. |
 | `HOUDINI_API_KEY` | Partner API key (`id:secret`), if you have one. Takes precedence. |
 | `HOUDINI_PARTNER_ID` | Public partner ID. |
 | `HOUDINI_API_URL` | API base URL. Defaults to the production partner API. |
@@ -86,8 +92,9 @@ None is strictly required — the server starts without any of them, but every t
 - **Paid calls are spaced ~5 seconds apart.** The facilitator settles each payment on-chain and two
   at once from the same wallet fail, so the client serialises them. A full swap takes 20-30s; that
   is expected, not a hang. Individual payments time out after 60s.
-- **A payment ceiling is enforced client-side.** The signer only accepts USDC on Base up to $0.10
-  per call, so a misconfigured or hostile endpoint cannot drain the wallet.
+- **A payment ceiling is enforced client-side.** The signer only accepts USDC on Base or Solana
+  (for the keys you set) up to $0.10 per call, so a misconfigured or hostile endpoint cannot drain
+  the wallet.
 - **HTTP mode binds loopback only** and has no authentication. Put an authenticating proxy in front
   of it before exposing it.
 

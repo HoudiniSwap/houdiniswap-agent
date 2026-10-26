@@ -2,7 +2,7 @@
 
 [Vercel AI SDK](https://sdk.vercel.ai) tool definitions for
 [HoudiniSwap](https://houdini.com) — crypto swap aggregation across 14 CEXes and 20+ DEXes, paid
-per call in USDC on Base via [x402](https://docs.cdp.coinbase.com/x402/welcome).
+per call in USDC on Base or Solana via [x402](https://docs.cdp.coinbase.com/x402/welcome).
 
 ```bash
 npm install @houdiniswap/ai-tools
@@ -27,8 +27,12 @@ const { text } = await generateText({
 ## A funded wallet is required
 
 Every tool costs money — there is no free tier. Fund an EVM wallet with a couple of dollars of
-**USDC on Base**. No ETH needed; payments are gasless EIP-3009 authorisations. Use a wallet holding
-only what you intend to spend.
+**USDC on Base**. No ETH needed; payments are gasless EIP-3009 authorisations. To pay with **USDC on
+Solana** instead, pass `auth: { type: "x402", svmPrivateKey }` (the base58 key Phantom or Solflare
+export); no SOL needed. Pass both keys to pay from either wallet: Base is tried first, or Solana with
+`network: "solana"`, and a payment refused on one is retried on the other. Pass
+`onPayment: (p) => …` next to `auth` to learn the network, amount, payer and transaction of each
+payment. Use a wallet holding only what you intend to spend.
 
 ## Tools
 
