@@ -2,9 +2,10 @@
   "mcpServers": {
     "houdiniswap": {
       "command": "npx",
-      "args": ["-y", "@houdiniswap/mcp-server"],
+      "args": ["-y", "@houdiniswap/mcp-server@latest"],
       "env": {
-        "HOUDINI_X402_PRIVATE_KEY": "0xYOUR_WALLET_PRIVATE_KEY"
+        "HOUDINI_X402_PRIVATE_KEY": "0xYOUR_EVM_PRIVATE_KEY",
+        "HOUDINI_X402_SVM_PRIVATE_KEY": "YOUR_SOLANA_PRIVATE_KEY"
       }
     }
   }

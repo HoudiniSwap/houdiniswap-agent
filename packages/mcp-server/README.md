@@ -32,7 +32,11 @@ explorer link to the transaction, and the network that refused first if the othe
 That installs the swap skill *and* wires up this server. Or, MCP server only:
 
 ```bash
-claude mcp add houdiniswap --env HOUDINI_X402_PRIVATE_KEY=0x... -- npx -y @houdiniswap/mcp-server
+# Pay with USDC on Base:
+claude mcp add houdiniswap --env HOUDINI_X402_PRIVATE_KEY=0x... -- npx -y @houdiniswap/mcp-server@latest
+# Pay with USDC on Solana:
+claude mcp add houdiniswap --env HOUDINI_X402_SVM_PRIVATE_KEY=<base58 key> -- npx -y @houdiniswap/mcp-server@latest
+# Both: pass both --env flags, plus --env HOUDINI_X402_NETWORK=solana to pay on Solana first
 ```
 
 ## Claude Desktop / Cursor
@@ -42,12 +46,19 @@ claude mcp add houdiniswap --env HOUDINI_X402_PRIVATE_KEY=0x... -- npx -y @houdi
   "mcpServers": {
     "houdiniswap": {
       "command": "npx",
-      "args": ["-y", "@houdiniswap/mcp-server"],
-      "env": { "HOUDINI_X402_PRIVATE_KEY": "0xYOUR_WALLET_PRIVATE_KEY" }
+      "args": ["-y", "@houdiniswap/mcp-server@latest"],
+      "env": {
+        "HOUDINI_X402_PRIVATE_KEY": "0xYOUR_EVM_PRIVATE_KEY",
+        "HOUDINI_X402_SVM_PRIVATE_KEY": "YOUR_SOLANA_PRIVATE_KEY"
+      }
     }
   }
 }
 ```
+
+Keep the key line for each wallet you pay from and delete the other; `HOUDINI_X402_NETWORK` (below) picks
+the network paid on first when both are set. `@latest` picks up new releases when the client restarts
+the server.
 
 The `-y` matters: without it npx prompts on stdin, which for a stdio MCP server is the JSON-RPC
 channel, and the server never starts.
