@@ -1,6 +1,6 @@
 # HoudiniSwap Agent
 
-MCP Server + AI SDK Tools for [HoudiniSwap](https://houdiniswap.com) — agent-friendly crypto swap aggregation with x402 pay-per-use.
+MCP Server + AI SDK Tools for [HoudiniSwap](https://houdini.com) — agent-friendly crypto swap aggregation with x402 pay-per-use.
 
 ## What is this?
 
@@ -176,7 +176,7 @@ node packages/mcp-server/dist/index.js
 - [QA test guide](docs/qa-test-guide.md) — install, then 15 cases covering every feature, with measured costs and minimums
 - [Browser signing design](docs/local-signing.md) — how DEX signing works, and its threat model
 - [HoudiniSwap API Docs](https://docs.houdiniswap.com/api-reference/)
-- [x402 Payments Guide](https://docs.houdiniswap.com/docs/v2/x402-payments)
+- [x402 Payments Guide](https://docs.houdiniswap.com/developer-hub/core-concepts/x402-pay-per-request)
 - [x402 Protocol (Coinbase)](https://docs.cdp.coinbase.com/x402/welcome)
 - [MCP Specification](https://modelcontextprotocol.io/)
 

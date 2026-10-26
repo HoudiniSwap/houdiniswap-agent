@@ -5,9 +5,9 @@
   "version": "0.1.14",
   "author": {
     "name": "HoudiniSwap",
-    "url": "https://houdiniswap.com"
+    "url": "https://houdini.com"
   },
-  "homepage": "https://houdiniswap.com",
+  "homepage": "https://houdini.com",
   "repository": "https://github.com/HoudiniSwap/houdiniswap-agent",
   "license": "MIT",
   "keywords": [
