@@ -9,7 +9,7 @@
  */
 
 import { createHoudiniTools } from "@houdiniswap/ai-tools";
-import { ToolLoopAgent, stepCountIs } from "ai";
+import { ToolLoopAgent, isStepCount } from "ai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 
 const WALLET_KEY = process.env.WALLET_KEY;
@@ -56,7 +56,7 @@ Guidelines:
 - For simple swaps, use the "swap" composite tool
 - Mention the deposit address clearly when an exchange is created
 - If a quote fails, suggest adjusting the amount or trying a different pair`,
-    stopWhen: stepCountIs(10),
+    stopWhen: isStepCount(10),
 });
 
 console.log(`\nPrompt: ${prompt}\n`);

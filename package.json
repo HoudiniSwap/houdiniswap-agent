@@ -13,7 +13,7 @@
     "clean": "turbo run clean"
   },
   "devDependencies": {
-    "@ai-sdk/anthropic": "^3.0.69",
+    "@ai-sdk/anthropic": "^4.0.0",
     "turbo": "^2.4.0",
     "typescript": "^5.7.0"
   }
