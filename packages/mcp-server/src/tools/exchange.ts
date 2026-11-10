@@ -20,7 +20,7 @@ export const registerExchangeTools = (server: McpServer, client: HoudiniClient) 
                     z.object({
                         signature: z.string(),
                         key: z.string(),
-                        swapRequiredMetadata: z.record(z.unknown()).optional(),
+                        swapRequiredMetadata: z.record(z.string(), z.unknown()).optional(),
                     }),
                 )
                 .optional()
