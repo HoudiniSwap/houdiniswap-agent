@@ -1,6 +1,6 @@
 {
   "name": "@houdiniswap/mcp-server",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "description": "HoudiniSwap MCP server — connect AI agents to 14 CEXes and 20+ DEXes via Model Context Protocol",
   "type": "module",
   "license": "MIT",
@@ -47,7 +47,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@houdiniswap/agent-shared": "^0.1.10",
+    "@houdiniswap/agent-shared": "^0.1.11",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "express": "^4.21.0",
     "zod": "^4.6.6"
