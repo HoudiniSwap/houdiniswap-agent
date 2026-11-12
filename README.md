@@ -18,7 +18,7 @@ HoudiniSwap aggregates 14 CEXes and 20+ DEXes across multiple blockchains. This 
 
 ### With x402 (no signup needed)
 
-Pay per request with USDC on Base or Solana. No API key registration required. To pay on Solana, set `HOUDINI_X402_SVM_PRIVATE_KEY` (the base58 key Phantom or Solflare export) instead of, or as well as, the EVM key below. With both keys, set `HOUDINI_X402_NETWORK=solana` to pay on Solana first; a payment refused on one network is retried on the other.
+Pay per request with USDC on Base or Solana. No API key registration required. To pay on Solana, set `HOUDINI_X402_SVM_PRIVATE_KEY` (the base58 key Phantom or Solflare export) instead of, or as well as, the EVM key below. Keep the key line for each wallet you pay from and delete the other. With both keys, set `HOUDINI_X402_NETWORK=solana` to pay on Solana first; a payment refused on one network before it settles is retried on the other, and a call is never charged twice. `@latest` picks up new releases when the client restarts the server.
 
 **Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
 ```json
@@ -26,9 +26,10 @@ Pay per request with USDC on Base or Solana. No API key registration required. T
   "mcpServers": {
     "houdiniswap": {
       "command": "npx",
-      "args": ["-y", "@houdiniswap/mcp-server"],
+      "args": ["-y", "@houdiniswap/mcp-server@latest"],
       "env": {
-        "HOUDINI_X402_PRIVATE_KEY": "0xYOUR_WALLET_PRIVATE_KEY"
+        "HOUDINI_X402_PRIVATE_KEY": "0xYOUR_EVM_PRIVATE_KEY",
+        "HOUDINI_X402_SVM_PRIVATE_KEY": "YOUR_SOLANA_PRIVATE_KEY"
       }
     }
   }
@@ -41,9 +42,10 @@ Pay per request with USDC on Base or Solana. No API key registration required. T
   "mcpServers": {
     "houdiniswap": {
       "command": "npx",
-      "args": ["-y", "@houdiniswap/mcp-server"],
+      "args": ["-y", "@houdiniswap/mcp-server@latest"],
       "env": {
-        "HOUDINI_X402_PRIVATE_KEY": "0xYOUR_WALLET_PRIVATE_KEY"
+        "HOUDINI_X402_PRIVATE_KEY": "0xYOUR_EVM_PRIVATE_KEY",
+        "HOUDINI_X402_SVM_PRIVATE_KEY": "YOUR_SOLANA_PRIVATE_KEY"
       }
     }
   }
@@ -52,7 +54,11 @@ Pay per request with USDC on Base or Solana. No API key registration required. T
 
 **Claude Code — MCP server only:**
 ```bash
-claude mcp add houdiniswap --env HOUDINI_X402_PRIVATE_KEY=0x... -- npx -y @houdiniswap/mcp-server
+# Pay with USDC on Base:
+claude mcp add houdiniswap --env HOUDINI_X402_PRIVATE_KEY=0x... -- npx -y @houdiniswap/mcp-server@latest
+# Pay with USDC on Solana:
+claude mcp add houdiniswap --env HOUDINI_X402_SVM_PRIVATE_KEY=<base58 key> -- npx -y @houdiniswap/mcp-server@latest
+# Both: pass both --env flags, plus --env HOUDINI_X402_NETWORK=solana to pay on Solana first
 ```
 
 **Claude Code — plugin (skill + MCP server in one install):**
@@ -60,7 +66,7 @@ claude mcp add houdiniswap --env HOUDINI_X402_PRIVATE_KEY=0x... -- npx -y @houdi
 /plugin marketplace add HoudiniSwap/houdiniswap-agent
 /plugin install houdiniswap@houdiniswap
 ```
-Installs the HoudiniSwap swap-agent skill **and** wires up the MCP server. Claude Code prompts for your x402 wallet key at enable time and stores it outside `settings.json`. Where exactly depends on the platform — on Linux it is written to `~/.claude/.credentials.json` (mode 0600, plaintext), not an OS keychain. Treat the machine as able to read the key, and use a wallet funded with only what you intend to spend.
+Installs the HoudiniSwap swap-agent skill **and** wires up the MCP server. Claude Code prompts for your x402 keys (Base, Solana, or both, and which network pays first) at enable time and stores it outside `settings.json`. Where exactly depends on the platform — on Linux it is written to `~/.claude/.credentials.json` (mode 0600, plaintext), not an OS keychain. Treat the machine as able to read the key, and use a wallet funded with only what you intend to spend.
 
 A funded wallet is **required** — the API is pay-per-call and only `GET /status` is free, so without a key every tool returns 402. Fund a wallet with a couple of dollars of USDC on Base or Solana and you're set; no gas needed — on Base payments are gasless EIP-3009 authorizations, on Solana the facilitator pays the network fee.
 

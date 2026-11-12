@@ -39,7 +39,11 @@ verify step, and documented the plugin-install flow and the shared → mcp-serve
 
 ```bash
 # MCP server only:
-claude mcp add houdiniswap --env HOUDINI_X402_PRIVATE_KEY=0x... -- npx -y @houdiniswap/mcp-server
+# Pay with USDC on Base:
+claude mcp add houdiniswap --env HOUDINI_X402_PRIVATE_KEY=0x... -- npx -y @houdiniswap/mcp-server@latest
+# Pay with USDC on Solana:
+claude mcp add houdiniswap --env HOUDINI_X402_SVM_PRIVATE_KEY=<base58 key> -- npx -y @houdiniswap/mcp-server@latest
+# Both: pass both --env flags, plus --env HOUDINI_X402_NETWORK=solana to pay on Solana first
 
 # Skill + MCP server via marketplace:
 /plugin marketplace add HoudiniSwap/houdiniswap-agent
