@@ -73,6 +73,14 @@ export const registerSigningTools = (
                 });
             }
 
+            // Same rule as cexDepositRequest: once the order has moved on, the
+            // swap was already sent, and a fresh page would let it go out twice.
+            if (typeof order.status === "number" && order.status > 0) {
+                return asToolResult({
+                    error: `Order ${houdiniId} is past waiting for its transaction (status ${order.status}). Do not sign again — read the order with getOrder to see where it is.`,
+                });
+            }
+
             // `value` is only ever validated here. It reaches BigInt on both
             // sides — the summary and the wallet call — and BigInt throws on
             // anything that is not an integer literal, including "1e+21",
@@ -99,7 +107,11 @@ export const registerSigningTools = (
                 return asToolResult({ error: `Could not determine the chain for order ${houdiniId}.` });
             }
 
-            const expiresAt = order.expires ? Date.parse(order.expires) : Date.now() + 15 * 60_000;
+            // An unparseable `expires` must not become NaN: every comparison
+            // against it is false, so the entry would never expire, and
+            // toISOString() below would throw after the entry was registered.
+            const declared = order.expires ? Date.parse(order.expires) : Number.NaN;
+            const expiresAt = Number.isNaN(declared) ? Date.now() + 15 * 60_000 : declared;
             // So the page can show what the swap does, not just where the
             // calldata points. Every router encodes its swap differently, so
             // these come from the order rather than from decoding `data`.

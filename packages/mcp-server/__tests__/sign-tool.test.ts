@@ -106,6 +106,22 @@ describe("dexSignRequest against the real order shape", () => {
         expect(out.error).toContain("no signable transaction");
     });
 
+    // Past waiting, the swap was already sent; a fresh page would let the same
+    // transaction go out a second time.
+    it("refuses an order that is past waiting for its transaction", async () => {
+        const out = await callSign({ ...RAW_ORDER, status: 1 });
+        expect(out.url).toBeUndefined();
+        expect(out.error).toMatch(/past waiting/);
+    });
+
+    it("falls back to a bounded expiry when expires is unparseable", async () => {
+        const out = await callSign({ ...RAW_ORDER, expires: "not a date" });
+        expect(out.error).toBeUndefined();
+        const expiresAt = Date.parse(out.expiresAt);
+        expect(expiresAt).toBeGreaterThan(Date.now());
+        expect(expiresAt).toBeLessThanOrEqual(Date.now() + 15 * 60_000);
+    });
+
     it("reports plainly when the chain cannot be determined", async () => {
         const out = await callSign({ ...RAW_ORDER, inToken: { symbol: "USDC" } });
         expect(out.error).toContain("Could not determine the chain");

@@ -145,6 +145,57 @@ export const summarise = (
     return rows;
 };
 
+const EXPLORERS: Record<number, string> = {
+    1: "https://etherscan.io",
+    10: "https://optimistic.etherscan.io",
+    56: "https://bscscan.com",
+    137: "https://polygonscan.com",
+    8453: "https://basescan.org",
+    42161: "https://arbiscan.io",
+    43114: "https://snowtrace.io",
+};
+
+/**
+ * Served instead of the form once a transaction has been sent. No script and no
+ * wallet code, so reloading or reopening the link cannot send it a second time.
+ */
+export const renderSignedPage = (
+    houdiniId: string,
+    chainId: number,
+    txHash: string | undefined,
+    order: OrderFacts = {},
+): string => {
+    const heading = order.depositAddress !== undefined ? "Deposit sent" : "Swap signed";
+    const base = EXPLORERS[chainId];
+    // txHash is validated as 0x + 64 hex before it is stored; esc() anyway.
+    const hash = txHash
+        ? base
+            ? `<a href="${esc(base)}/tx/${esc(txHash)}" rel="noreferrer noopener">${esc(txHash)}</a>`
+            : esc(txHash)
+        : "";
+    return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(heading)} · HoudiniSwap</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin:0; padding:2rem 1rem; font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }
+  main { max-width:44rem; margin:0 auto; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; word-break:break-all; }
+</style>
+</head>
+<body>
+<main>
+  <h1>${esc(heading)}</h1>
+  <p>Order <code>${esc(houdiniId)}</code> has already been sent from this link. Nothing more is needed here and it cannot be sent again. You can close this tab.</p>
+  ${hash ? `<p>Transaction: <code>${hash}</code></p>` : ""}
+</main>
+</body>
+</html>`;
+};
+
 export const renderSignPage = (
     tx: SignableTransaction,
     chainId: number,

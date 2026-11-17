@@ -1,6 +1,6 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomBytes } from "node:crypto";
-import { renderSignPage, type OrderFacts, type SignableTransaction } from "./page.js";
+import { renderSignPage, renderSignedPage, type OrderFacts, type SignableTransaction } from "./page.js";
 
 /**
  * A loopback signer for DEX transactions, so a user never has to paste a private
@@ -163,6 +163,13 @@ export class SigningServer {
         // the grace, because by then the user may already have broadcast.
         const expired = Date.now() > entry.expiresAt;
         if (req.method === "GET") {
+            // Checked before expiry: a signed entry has a hash worth showing for
+            // as long as it lives, and must never serve the form again. A
+            // reload or second tab on the live form would broadcast the same
+            // transfer twice (the second report is refused with a 409, but the
+            // transaction is already sent). "rejected" keeps the form: nothing
+            // was sent, so the user may try again.
+            if (entry.status === "signed") return this.serveSigned(res, entry);
             if (expired) return this.notFound(res);
             return this.servePage(res, entry);
         }
@@ -171,12 +178,19 @@ export class SigningServer {
         res.writeHead(405, { Allow: "GET, POST" }).end();
     }
 
+    private serveSigned(res: ServerResponse, entry: PendingSignature): void {
+        this.html(res, renderSignedPage(entry.houdiniId, entry.chainId, entry.txHash, entry.order));
+    }
+
     private servePage(res: ServerResponse, entry: PendingSignature): void {
         // Rendered before the status line is written. Doing it the other way
         // round meant a throw during rendering left a 200 already on the wire,
         // so the handler's catch could only end the response — the client got
         // an empty page that claimed success.
-        const html = renderSignPage(entry.tx, entry.chainId, entry.houdiniId, entry.token, entry.order);
+        this.html(res, renderSignPage(entry.tx, entry.chainId, entry.houdiniId, entry.token, entry.order));
+    }
+
+    private html(res: ServerResponse, html: string): void {
         res.writeHead(200, {
             "Content-Type": "text/html; charset=utf-8",
             // Everything is inline; nothing may be fetched from anywhere else.
@@ -205,8 +219,12 @@ export class SigningServer {
         if (origin !== expected) {
             return this.json(res, 403, { error: "cross-origin request refused" });
         }
-        if (entry.status !== "pending" && entry.status !== "expired") {
-            return this.json(res, 409, { error: `this request is already ${entry.status}` });
+        // Only "signed" is final. A rejection leaves the form live (nothing was
+        // sent, so the user may try again), and a retry that then succeeds must
+        // be recorded: refusing it lost the hash of a transaction already on
+        // chain and told the agent nothing was sent.
+        if (entry.status === "signed") {
+            return this.json(res, 409, { error: "this request is already signed" });
         }
 
         let body = "";
@@ -233,8 +251,8 @@ export class SigningServer {
             // passes that first check, so all of them are accepted and the last
             // hash wins — single use in name only. Nothing awaits between this
             // test and the assignments below, so together they are atomic.
-            if (entry.status !== "pending" && entry.status !== "expired") {
-                return this.json(res, 409, { error: `this request is already ${entry.status}` });
+            if (entry.status === "signed") {
+                return this.json(res, 409, { error: "this request is already signed" });
             }
 
             let parsed: { txHash?: unknown; error?: unknown };
@@ -255,6 +273,8 @@ export class SigningServer {
 
             entry.status = "signed";
             entry.txHash = parsed.txHash;
+            // A retry after a rejection: the earlier failure no longer describes it.
+            entry.error = undefined;
             this.json(res, 200, { ok: true });
         });
     }
