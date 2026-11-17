@@ -1,6 +1,6 @@
 import { USDC_BASE, USDC_SOLANA } from "./constants.js";
 import type { HoudiniConfig, HoudiniAuth, ApiError } from "./types.js";
-import { createX402Fetch } from "./x402.js";
+import { createX402Fetch, X402PaymentUnconfirmedError } from "./x402.js";
 
 const DEFAULT_BASE_URL = "https://api-partner.houdiniswap.com/v2";
 
@@ -80,7 +80,10 @@ export class HoudiniClient {
         try {
             return await run(controller.signal);
         } catch (err) {
-            if (controller.signal.aborted) {
+            // A paid retry outlives this bound (it has its own), so by the time
+            // it fails this signal has usually fired too. Relabelling that as a
+            // plain timeout hid that the call may already be paid for.
+            if (controller.signal.aborted && !(err instanceof X402PaymentUnconfirmedError)) {
                 throw new Error(`Request timed out after ${this.timeoutMs}ms`);
             }
             throw err;

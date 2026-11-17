@@ -137,6 +137,24 @@ const refusedBeforeSettlement = (res: Response, accepted?: { extra?: Record<stri
  * offers (it lists Base first), and a payment refused there before settlement
  * is retried once on the other network.
  */
+/**
+ * Thrown when a request carrying a signed payment fails without an answer:
+ * the payment may already be settled and the request carried out (an order
+ * created, say), so the caller must not treat it as a plain failure and retry.
+ */
+export class X402PaymentUnconfirmedError extends Error {
+    constructor(cause: unknown) {
+        const why = cause instanceof Error ? cause.message : String(cause);
+        super(
+            `x402: a signed payment was sent with this request, but no answer came back (${why}). ` +
+                "The payment may have been taken and the request carried out — an order may already exist. " +
+                "Do not retry blindly: check the order list or the order first.",
+            { cause },
+        );
+        this.name = "X402PaymentUnconfirmedError";
+    }
+}
+
 export const createX402Fetch = (keys: `0x${string}` | X402Keys, options: X402Options = {}): typeof fetch => {
     const { evm, svm } = typeof keys === "string" ? { evm: keys, svm: undefined } : keys;
     if (!evm && !svm) throw new Error("createX402Fetch needs an EVM key, a Solana key, or both");
@@ -323,7 +341,7 @@ export const createX402Fetch = (keys: `0x${string}` | X402Keys, options: X402Opt
                     );
                 } catch (err) {
                     controller.abort();
-                    throw err;
+                    throw new X402PaymentUnconfirmedError(err);
                 } finally {
                     // After the retry resolves, so the next payment waits out this
                     // settlement rather than starting the clock at signing time.
