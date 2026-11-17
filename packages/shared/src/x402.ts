@@ -80,6 +80,8 @@ const DEFAULT_MAX_PAYMENT_ATOMIC = 100_000n;
  */
 const DEFAULT_BUDGET_ATOMIC = 10_000_000n;
 
+const SPENDING_LIMIT = "spending limit reached";
+
 const usdc = (atomic: bigint): string => `${Number(atomic) / 1e6} USDC`;
 
 export interface X402Options {
@@ -252,7 +254,7 @@ export const createX402Fetch = (keys: `0x${string}` | X402Keys, options: X402Opt
             return {
                 abort: true,
                 reason:
-                    `spending limit reached: this session has signed ${usdc(spentAtomic)} of payments and the next one ` +
+                    `${SPENDING_LIMIT}: this session has signed ${usdc(spentAtomic)} of payments and the next one ` +
                     `(${usdc(amount)}) would pass the ${usdc(budgetAtomic)} limit. Start a new session, or raise the limit ` +
                     "with the budgetAtomic option (HOUDINI_X402_BUDGET_USDC for the MCP server).",
             };
@@ -425,9 +427,16 @@ export const createX402Fetch = (keys: `0x${string}` | X402Keys, options: X402Opt
                 required = { ...required, accepts: others };
                 try {
                     payload = await sign(required);
-                } catch {
-                    // Why the first network refused says more than why the
-                    // other one could not be signed.
+                } catch (err) {
+                    // The spending limit is the one reason that says more: the
+                    // first network's refusal would send the user looking for
+                    // missing funds instead.
+                    if (err instanceof Error && err.message.includes(SPENDING_LIMIT)) {
+                        await paid.body?.cancel().catch(() => {});
+                        throw err;
+                    }
+                    // Otherwise why the first network refused says more than
+                    // why the other one could not be signed.
                     return paid;
                 }
                 refused.push({ network: tried as string, reason: refusalReason(paid) });

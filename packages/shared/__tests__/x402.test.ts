@@ -823,9 +823,11 @@ describe("Solana", () => {
             expect(signedNetworks()).toEqual(["eip155:8453"]);
         });
 
-        it("counts the refused payment against the budget", async () => {
+        it("counts the refused payment against the budget, and says the limit stopped the fallback", async () => {
             paymentRequirements = [base(), solana()];
-            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, { budgetAtomic: 150n }, { "eip155:8453": "refused" })).toBe(402);
+            await expect(paying({ evm: EVM_KEY, svm: SVM_KEY }, { budgetAtomic: 150n }, { "eip155:8453": "refused" })).rejects.toThrow(
+                /spending limit reached: this session has signed 0\.0001 USDC/,
+            );
             expect(signedNetworks()).toEqual(["eip155:8453"]);
         });
 
