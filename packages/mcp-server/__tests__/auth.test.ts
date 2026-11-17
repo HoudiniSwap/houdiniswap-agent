@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { getAuthConfig } from "../src/auth.js";
+import { getAuthConfig, getX402Policy } from "../src/auth.js";
 
 const AUTH_VARS = [
     "HOUDINI_API_KEY",
@@ -7,6 +7,9 @@ const AUTH_VARS = [
     "HOUDINI_X402_SVM_PRIVATE_KEY",
     "HOUDINI_X402_NETWORK",
     "HOUDINI_PARTNER_ID",
+    "HOUDINI_X402_PAY_TO_BASE",
+    "HOUDINI_X402_PAY_TO_SOLANA",
+    "HOUDINI_X402_BUDGET_USDC",
 ] as const;
 
 const VALID_KEY = `0x${"a".repeat(64)}`;
@@ -220,5 +223,67 @@ describe("getAuthConfig", () => {
             process.env.HOUDINI_X402_NETWORK = "solana";
             expect(getAuthConfig()).toEqual({ type: "x402", privateKey: VALID_KEY });
         });
+    });
+});
+
+describe("getX402Policy", () => {
+    const VARS = ["HOUDINI_X402_PAY_TO_BASE", "HOUDINI_X402_PAY_TO_SOLANA", "HOUDINI_X402_BUDGET_USDC"] as const;
+    let saved: Record<string, string | undefined>;
+
+    beforeEach(() => {
+        saved = Object.fromEntries(VARS.map((k) => [k, process.env[k]]));
+        for (const k of VARS) delete process.env[k];
+        vi.spyOn(console, "error").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+        for (const k of VARS) {
+            if (saved[k] === undefined) delete process.env[k];
+            else process.env[k] = saved[k];
+        }
+        vi.restoreAllMocks();
+    });
+
+    it("leaves the defaults alone when nothing is set", () => {
+        expect(getX402Policy()).toEqual({});
+    });
+
+    it("reads comma-separated recipients per network", () => {
+        process.env.HOUDINI_X402_PAY_TO_BASE = "0x1111111111111111111111111111111111111111, 0x2222222222222222222222222222222222222222";
+        process.env.HOUDINI_X402_PAY_TO_SOLANA = "Bdg25JW8RBHKeq5YDWDrbH5Q2H8GaZFwqD6G4zPn2P2x";
+        expect(getX402Policy()).toEqual({
+            payTo: {
+                base: ["0x1111111111111111111111111111111111111111", "0x2222222222222222222222222222222222222222"],
+                solana: ["Bdg25JW8RBHKeq5YDWDrbH5Q2H8GaZFwqD6G4zPn2P2x"],
+            },
+        });
+    });
+
+    it("ignores a list with a malformed address, and says so", () => {
+        process.env.HOUDINI_X402_PAY_TO_BASE = "0x1111111111111111111111111111111111111111,not-an-address";
+        expect(getX402Policy()).toEqual({});
+        expect(console.error).toHaveBeenCalledWith(expect.stringContaining("HOUDINI_X402_PAY_TO_BASE"));
+    });
+
+    it("ignores an unexpanded placeholder", () => {
+        process.env.HOUDINI_X402_PAY_TO_SOLANA = "${user_config.pay_to}";
+        expect(getX402Policy()).toEqual({});
+    });
+
+    it("reads the budget in USDC", () => {
+        process.env.HOUDINI_X402_BUDGET_USDC = "2.5";
+        expect(getX402Policy()).toEqual({ budgetAtomic: 2_500_000n });
+        process.env.HOUDINI_X402_BUDGET_USDC = "100";
+        expect(getX402Policy()).toEqual({ budgetAtomic: 100_000_000n });
+        process.env.HOUDINI_X402_BUDGET_USDC = "0.000001";
+        expect(getX402Policy()).toEqual({ budgetAtomic: 1n });
+    });
+
+    it("ignores a budget that is not an amount, and says so", () => {
+        for (const value of ["-1", "ten", "1.0000001", "1e3"]) {
+            process.env.HOUDINI_X402_BUDGET_USDC = value;
+            expect(getX402Policy()).toEqual({});
+        }
+        expect(console.error).toHaveBeenCalledWith(expect.stringContaining("HOUDINI_X402_BUDGET_USDC"));
     });
 });

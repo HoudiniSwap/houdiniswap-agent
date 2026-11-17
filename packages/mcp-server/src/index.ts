@@ -3,7 +3,7 @@ import { createMcpServer } from "./server.js";
 import { SigningServer } from "./signing/server.js";
 import { HoudiniClient } from "@houdiniswap/agent-shared";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { getAuthConfig } from "./auth.js";
+import { getAuthConfig, getX402Policy } from "./auth.js";
 import { recordPayment } from "./payments.js";
 
 const main = async () => {
@@ -15,6 +15,7 @@ const main = async () => {
         baseUrl,
         auth: getAuthConfig(),
         onPayment: recordPayment,
+        x402: getX402Policy(),
     });
 
     const server = createMcpServer(client);

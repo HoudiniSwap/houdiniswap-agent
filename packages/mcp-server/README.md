@@ -80,6 +80,8 @@ tool-result limit.
 | `HOUDINI_X402_PRIVATE_KEY` | EVM key for x402 payments in USDC on Base. Accepted with or without the `0x` prefix. |
 | `HOUDINI_X402_SVM_PRIVATE_KEY` | Solana secret key for x402 payments in USDC on Solana: the base58 string Phantom or Solflare export. |
 | `HOUDINI_X402_NETWORK` | With both x402 keys, the network paid on first: `base` (default) or `solana`. A payment refused there is retried on the other. |
+| `HOUDINI_X402_PAY_TO_BASE` / `HOUDINI_X402_PAY_TO_SOLANA` | Comma-separated recipients x402 pays on that network. Default: HoudiniSwap's production addresses. Set them only for another HoudiniSwap environment. |
+| `HOUDINI_X402_BUDGET_USDC` | Most the server signs in x402 payments while it runs, in USDC. Default `10`. |
 | `HOUDINI_API_KEY` | Partner API key (`id:secret`), if you have one. Takes precedence. |
 | `HOUDINI_PARTNER_ID` | Public partner ID. |
 | `HOUDINI_API_URL` | API base URL. Defaults to the production partner API. |
@@ -93,8 +95,8 @@ None is strictly required — the server starts without any of them, but every t
   at once from the same wallet fail, so the client serialises them. A full swap takes 20-30s; that
   is expected, not a hang. Individual payments time out after 60s.
 - **A payment ceiling is enforced client-side.** The signer only accepts USDC on Base or Solana
-  (for the keys you set) up to $0.10 per call, so a misconfigured or hostile endpoint cannot drain
-  the wallet.
+  (for the keys you set), paid to HoudiniSwap's addresses, up to $0.10 per call and $10 per run
+  (`HOUDINI_X402_BUDGET_USDC`), so a misconfigured or hostile endpoint cannot drain the wallet.
 - **HTTP mode binds loopback only** and has no authentication. Put an authenticating proxy in front
   of it before exposing it.
 
