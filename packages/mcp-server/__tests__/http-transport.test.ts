@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import http from "node:http";
 
 /**
  * The HTTP transport served exactly one request. A single long-lived transport
@@ -100,6 +101,40 @@ describe("HTTP transport", () => {
 });
 
 describe("HTTP transport hardening", () => {
+    // fetch cannot set Host, so these go through node:http.
+    const postWithHost = (host: string) =>
+        new Promise<number>((resolve, reject) => {
+            const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+            const req = http.request(
+                {
+                    host: HOST,
+                    port: PORT,
+                    path: "/mcp",
+                    method: "POST",
+                    headers: {
+                        Host: host,
+                        "Content-Type": "application/json",
+                        Accept: "application/json, text/event-stream",
+                        "Content-Length": Buffer.byteLength(body),
+                    },
+                },
+                (res) => {
+                    res.resume();
+                    resolve(res.statusCode ?? 0);
+                },
+            );
+            req.on("error", reject);
+            req.end(body);
+        });
+
+    it("refuses a request addressed to another host name", async () => {
+        expect(await postWithHost(`attacker.example:${PORT}`)).toBe(403);
+    });
+
+    it("answers a request addressed to localhost", async () => {
+        expect(await postWithHost(`localhost:${PORT}`)).toBe(200);
+    });
+
     // GET opened a notification stream the SDK never closed, pinning the
     // per-request server for as long as the socket was held. 181 idle GETs
     // OOM-killed the process, unauthenticated.

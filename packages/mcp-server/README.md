@@ -86,6 +86,7 @@ tool-result limit.
 | `HOUDINI_PARTNER_ID` | Public partner ID. |
 | `HOUDINI_API_URL` | API base URL. Defaults to the production partner API. |
 | `PORT` / `HOUDINI_HTTP_HOST` | HTTP transport only. Binds `127.0.0.1:8080` by default. |
+| `HOUDINI_HTTP_ALLOWED_HOSTS` | HTTP transport only. Extra comma-separated host names `/mcp` answers to, for a proxy that forwards another name. |
 
 None is strictly required — the server starts without any of them, but every tool then returns 402.
 
@@ -98,6 +99,7 @@ None is strictly required — the server starts without any of them, but every t
   (for the keys you set), paid to HoudiniSwap's addresses, up to $0.10 per call and $10 per run
   (`HOUDINI_X402_BUDGET_USDC`), so a misconfigured or hostile endpoint cannot drain the wallet.
 - **HTTP mode binds loopback only** and has no authentication. Put an authenticating proxy in front
-  of it before exposing it.
+  of it before exposing it. `/mcp` answers only to the loopback names and `HOUDINI_HTTP_HOST`
+  (plus `HOUDINI_HTTP_ALLOWED_HOSTS`); a request addressed to any other host name gets a 403.
 
 MIT · [Source](https://github.com/HoudiniSwap/houdiniswap-agent)

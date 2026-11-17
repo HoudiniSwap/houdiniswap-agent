@@ -5,6 +5,7 @@ import { HoudiniClient } from "@houdiniswap/agent-shared";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { getAuthConfig, getX402Policy } from "./auth.js";
 import { recordPayment } from "./payments.js";
+import { allowedHostnames, hostCheck } from "./host-check.js";
 
 const main = async () => {
     const baseUrl = process.env.HOUDINI_API_URL;
@@ -27,6 +28,11 @@ const main = async () => {
         );
 
         const app = express.default();
+        const host = process.env.HOUDINI_HTTP_HOST || "127.0.0.1";
+
+        // Before anything reads the body, so a refused request costs nothing.
+        const hostnames = allowedHostnames(host, process.env.HOUDINI_HTTP_ALLOWED_HOSTS);
+        if (hostnames) app.use("/mcp", hostCheck(hostnames));
         app.use(express.json());
 
         // A transport instance serves exactly one request: reusing a single
@@ -107,8 +113,6 @@ const main = async () => {
         // authentication, so binding every interface put the operator's wallet
         // behind an open port. Set HOUDINI_HTTP_HOST to override deliberately,
         // and put authentication in front of it if you do.
-        const host = process.env.HOUDINI_HTTP_HOST || "127.0.0.1";
-
         const httpServer = app.listen(port, host, () => {
             console.error(`HoudiniSwap MCP server (HTTP) listening on ${host}:${port}`);
             if (host !== "127.0.0.1" && host !== "localhost") {
