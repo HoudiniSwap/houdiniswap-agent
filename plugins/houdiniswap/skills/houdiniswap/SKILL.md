@@ -106,7 +106,7 @@ Rules:
 - Format: **`Name (SYMBOL) on ChainName`**
 - Always show the contract `address` if it exists. For native tokens the key is **absent** (not null) — the shaping drops null values, so test with `address === undefined`, not `=== null`
 - Show `price` in USD if available
-- Flag `mainnet` and `unverified` status
+- Flag `mainnet` and `unverified` status, and the `securityScan.resultType` when it is `Warning` or `Malicious`
 - If the search returns multiple tokens with the same symbol, **list all of them** and ask the user to pick:
 
 ```
@@ -213,7 +213,8 @@ Partner, `sxff` FixedFloat (CEX); `un` Uniswap, `jp` Jupiter, `rd` Raydium, `ps`
    → Prefer mainnet: true → get id
 2. getTokens({ symbol: "BTC", chain: "bitcoin", hasCex: true })
    → Show token list → user confirms → get id
-3. If either token has unverified: true → WARN and require acknowledgment
+3. If either token has unverified: true, or a securityScan verdict of Warning or Malicious
+   → apply the Token Security Verdict rules below before going further
 4. getMinMax({ tokenIdFrom: ethId, tokenIdTo: btcId })
    → Verify amount is within cex.min and cex.max (or private.min/max)
 5. getQuote({ from: ethId, to: btcId, amount: 1, types: ["standard"] })
@@ -244,6 +245,7 @@ Check which one you got before doing anything else — it returns
 ```
 1. getTokens (find tokens)
 2. getQuote({ from, to, amount, types: ["dex"], senderAddress: "0x...", slippage: 1 })
+   → Apply the Token Security Verdict rules to fromTokenScan / toTokenScan
 3. dexCheckAllowance({ quoteId, addressFrom: "0x..." })   → returns a bare true/false
                                                             (true = sufficient, nothing to do)
    → If false: dexApprove({ quoteId, addressFrom: "0x..." })
@@ -332,7 +334,7 @@ swap({
 
 > ⚠️ **`swap` is exempt from Critical Rules 5-7 and can create a private order.**
 > It picks the token and the route itself and creates the order in a single call,
-> so there is no menu, no unverified-token warning and no price-impact check — and
+> so there is no menu, no unverified-token or security-verdict warning and no price-impact check — and
 > it returns neither `amountOutUsd` (so impact cannot be computed after the fact)
 > nor `displayStatus` (only the numeric `status`). It also quotes without a
 > `types` filter and takes the best non-DEX route, so **if a private route wins it
@@ -351,6 +353,28 @@ address before swapping. Scam tokens may impersonate legitimate projects.
 ```
 
 Do NOT proceed with the swap until the user explicitly acknowledges the risk.
+
+### Token Security Verdict
+Tokens from `getTokens` can carry `securityScan: { resultType, featureIds }`, and
+`getQuote` returns `fromTokenScan` / `toTokenScan` for the two tokens being
+quoted. Check both, the quote's being the most recent. Branch on `resultType` only:
+
+- **`Malicious`** — do NOT swap. Tell the user:
+  ```
+  ⛔ {symbol} on {chain} was flagged as MALICIOUS by a token security scan
+  ({featureIds}). Swapping into or out of it is very likely to lose funds.
+  ```
+  Only continue if the user, having seen this, explicitly insists on swapping
+  this exact token. Never continue on a vague "ok" or because the user asked
+  for the swap earlier.
+- **`Warning`** — warn before the route menu and require acknowledgment:
+  ```
+  ⚠️ {symbol} on {chain} has security warnings ({featureIds}). Check the
+  contract address and the token's reputation before swapping.
+  ```
+- **`Benign`**, **`Unscanned`**, or no verdict at all — no warning from this
+  rule. `Unscanned` means the token could not be screened, not that it is
+  unsafe; the unverified-token rule still applies on its own.
 
 ### Price Impact Check
 After getting quotes, **always calculate price impact** before showing results:
@@ -420,7 +444,7 @@ Allow the user to:
    (`"6689b757c90e45f3b3e51805"` instead of `"USDC"`). The embedded token objects are always
    correct.
 5. **Always show the route selection menu** with numbered options — let the user pick
-6. **Always check for unverified tokens** and warn before proceeding
+6. **Always check for unverified tokens and the security verdict** — warn on unverified or Warning, refuse Malicious unless the user explicitly insists
 7. **Always calculate price impact** and warn if > 2%
 8. **Check min/max** before quoting if the user's amount might be near limits
 9. **For DEX**: always require `addressFrom` (sender wallet) and `senderAddress` in quotes

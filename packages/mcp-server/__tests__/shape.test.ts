@@ -69,6 +69,34 @@ describe("compactToken", () => {
         expect(out.tokens[0].unverified).toBe(true);
     });
 
+    // The skill refuses a Malicious token and warns on a Warning one.
+    it("keeps the security verdict and finding ids, drops the rest of the scan", () => {
+        const scanned = {
+            ...token,
+            securityScan: {
+                provider: "x",
+                resultType: "Malicious",
+                maliciousScore: 0.97,
+                features: [
+                    { featureId: "KNOWN_MALICIOUS", type: "Malicious", description: "long text" },
+                    { featureId: "HONEYPOT", type: "Malicious", description: "long text" },
+                ],
+                scannedAt: "2026-11-18T00:00:00.000Z",
+                expiresAt: "2026-11-25T00:00:00.000Z",
+            },
+        };
+        expect((compactToken(scanned) as any).securityScan).toEqual({
+            resultType: "Malicious",
+            featureIds: ["KNOWN_MALICIOUS", "HONEYPOT"],
+        });
+        const list = compactTokenResult({ total: 1, tokens: [scanned] }) as any;
+        expect(list.tokens[0].securityScan.resultType).toBe("Malicious");
+    });
+
+    it("omits securityScan when the token has none", () => {
+        expect((compactToken(token) as any).securityScan).toBeUndefined();
+    });
+
     it("drops description, icon and market noise", () => {
         const out = compactToken(token) as Record<string, unknown>;
         expect(out.description).toBeUndefined();
@@ -241,6 +269,19 @@ describe("compactQuoteResult", () => {
             ...Array.from({ length: 138 }, (_, i) => quote("private", 12.5 - i * 0.001)),
         ],
     };
+
+    it("keeps the verdicts for both quoted tokens", () => {
+        const out = compactQuoteResult(
+            {
+                ...result,
+                fromTokenScan: { resultType: "Benign", features: [], scannedAt: "", expiresAt: "" },
+                toTokenScan: { resultType: "Warning", features: [{ featureId: "HIGH_TAX" }], scannedAt: "", expiresAt: "" },
+            },
+            5,
+        ) as any;
+        expect(out.fromTokenScan).toEqual({ resultType: "Benign" });
+        expect(out.toTokenScan).toEqual({ resultType: "Warning", featureIds: ["HIGH_TAX"] });
+    });
 
     it("keeps the best N of each type", () => {
         const out = compactQuoteResult(result, 5) as any;
