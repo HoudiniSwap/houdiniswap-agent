@@ -37,7 +37,7 @@ const signedRequirements: Array<Record<string, unknown>> = [];
 // What the server offers in its 402 challenge. Tests override it to model a
 // hostile server.
 let paymentRequirements: Array<Record<string, unknown>> = [
-    { scheme: "exact", network: "eip155:8453", amount: "100", asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", payTo: "0xreceiver" },
+    { scheme: "exact", network: "eip155:8453", amount: "100", asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", payTo: "0xe2FBF4e7F29Ad53F0D28BCbCF4088277C9916eAC" },
 ];
 
 /**
@@ -349,6 +349,36 @@ describe("payment bounds", () => {
         const f = createX402Fetch(`0x${"11".repeat(32)}`, { maxPaymentAtomic: 1_000n });
         await expect(f("https://api.test/x")).rejects.toThrow(/refusing to sign|filtered out/);
     });
+
+    it("refuses another recipient", async () => {
+        expect(await attempt(hostile({ payTo: "0x000000000000000000000000000000000000dEaD" }))).toMatch(/REFUSED|filtered out/);
+    });
+
+    it("says what was offered and how to allow another environment when every offer is refused", async () => {
+        const result = await attempt(hostile({ payTo: "0x000000000000000000000000000000000000dEaD" }));
+        expect(result).toContain("refusing to sign a payment of 100 of 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 on eip155:8453 to 0x000000000000000000000000000000000000dEaD");
+        expect(result).toContain("HOUDINI_X402_PAY_TO_BASE");
+    });
+
+    it("refuses an offer with no recipient", async () => {
+        expect(await attempt(hostile({ payTo: undefined }))).toMatch(/REFUSED|filtered out/);
+    });
+
+    it("matches the Base recipient in any casing", async () => {
+        expect(await attempt(hostile({ payTo: "0xe2fbf4e7f29ad53f0d28bcbcf4088277c9916eac" }))).toBe("SIGNED");
+    });
+
+    it("pays the recipients given in payTo instead of the default ones", async () => {
+        paymentRequirements = [hostile({ payTo: "0x1111111111111111111111111111111111111111" })];
+        mockFetch.mockReset();
+        mockFetch.mockImplementation(async (_u: string, init?: RequestInit) =>
+            new Response("{}", { status: (init?.headers as Record<string, string>)?.["x-payment"] ? 200 : 402 }));
+        const options = { payTo: { base: ["0x1111111111111111111111111111111111111111", "0x2222222222222222222222222222222222222222"] } };
+        expect((await createX402Fetch(`0x${"11".repeat(32)}`, options)("https://api.test/x")).status).toBe(200);
+
+        paymentRequirements = [hostile({})];
+        await expect(createX402Fetch(`0x${"11".repeat(32)}`, options)("https://api.test/x")).rejects.toThrow(/refusing to sign|filtered out/);
+    });
 });
 
 /**
@@ -360,7 +390,7 @@ describe("payment bounds", () => {
 describe("payment bounds — each layer independently", () => {
     const requirement = (over: Record<string, unknown>) => ({
         scheme: "exact", network: "eip155:8453", amount: "100",
-        asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", payTo: "0xreceiver", ...over,
+        asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", payTo: "0xe2FBF4e7F29Ad53F0D28BCbCF4088277C9916eAC", ...over,
     });
 
     // Reaches the policy directly, bypassing the hook.
@@ -427,6 +457,42 @@ describe("payment interval floor", () => {
         for (let i = 1; i < signs.length; i++) {
             expect(signs[i] - signs[i - 1], `gap ${i} was ${signs[i] - signs[i - 1]}ms`).toBeGreaterThanOrEqual(5000);
         }
+    });
+});
+
+describe("session budget", () => {
+    const paidOk = () => {
+        mockFetch.mockReset();
+        mockFetch.mockImplementation(async (_u: string, init?: RequestInit) =>
+            new Response("{}", { status: (init?.headers as Record<string, string>)?.["x-payment"] ? 200 : 402 }));
+    };
+
+    it("refuses the payment that would pass the budget, with a clear error", async () => {
+        vi.useFakeTimers();
+        paidOk();
+        const f = createX402Fetch(`0x${"11".repeat(32)}`, { budgetAtomic: 250n });
+        const results = Promise.allSettled([f("https://api.test/a"), f("https://api.test/b"), f("https://api.test/c")]);
+        await vi.advanceTimersByTimeAsync(60_000);
+        const [a, b, c] = await results;
+
+        expect(a.status).toBe("fulfilled");
+        expect(b.status).toBe("fulfilled");
+        expect(c.status).toBe("rejected");
+        expect(String((c as PromiseRejectedResult).reason)).toMatch(/spending limit reached.*0\.0002 USDC.*0\.00025 USDC limit.*HOUDINI_X402_BUDGET_USDC/);
+        expect(signedRequirements).toHaveLength(2);
+    });
+
+    it("is per client", async () => {
+        paidOk();
+        expect((await createX402Fetch(`0x${"11".repeat(32)}`, { budgetAtomic: 100n })("https://api.test/a")).status).toBe(200);
+        expect((await createX402Fetch(`0x${"11".repeat(32)}`, { budgetAtomic: 100n })("https://api.test/a")).status).toBe(200);
+    });
+
+    it("does not count requests that needed no payment", async () => {
+        mockFetch.mockReset();
+        mockFetch.mockResolvedValue(new Response("{}", { status: 200 }));
+        const f = createX402Fetch(`0x${"11".repeat(32)}`, { budgetAtomic: 0n });
+        expect((await f("https://api.test/a")).status).toBe(200);
     });
 });
 
@@ -595,6 +661,14 @@ describe("Solana", () => {
         expect(await attempt({ svm: SVM_KEY }, [solana({ amount: "1000000000" })])).toMatch(/REFUSED/);
     });
 
+    it("refuses another recipient on Solana", async () => {
+        expect(await attempt({ svm: SVM_KEY }, [solana({ payTo: "11111111111111111111111111111111" })])).toMatch(/REFUSED/);
+    });
+
+    it("matches the Solana recipient exactly, since base58 is case-sensitive", async () => {
+        expect(await attempt({ svm: SVM_KEY }, [solana({ payTo: "Bdg25JW8RBHKeq5YDWDrbH5Q2H8GaZFwqD6G4zPn2P2x".toLowerCase() })])).toMatch(/REFUSED/);
+    });
+
     it("registers the Solana scheme for mainnet only", async () => {
         vi.mocked(registerExactSvmScheme).mockClear();
         await attempt({ svm: SVM_KEY }, [solana()]);
@@ -741,6 +815,26 @@ describe("Solana", () => {
             paymentRequirements = [base(), solana({ amount: "1000000000" })];
             expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, {}, { "eip155:8453": "refused" })).toBe(402);
             expect(signedNetworks()).toEqual(["eip155:8453"]);
+        });
+
+        it("returns the first refusal when the other offer names another recipient", async () => {
+            paymentRequirements = [base(), solana({ payTo: "11111111111111111111111111111111" })];
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, {}, { "eip155:8453": "refused" })).toBe(402);
+            expect(signedNetworks()).toEqual(["eip155:8453"]);
+        });
+
+        it("counts the refused payment against the budget, and says the limit stopped the fallback", async () => {
+            paymentRequirements = [base(), solana()];
+            await expect(paying({ evm: EVM_KEY, svm: SVM_KEY }, { budgetAtomic: 150n }, { "eip155:8453": "refused" })).rejects.toThrow(
+                /spending limit reached: this session has signed 0\.0001 USDC/,
+            );
+            expect(signedNetworks()).toEqual(["eip155:8453"]);
+        });
+
+        it("still falls back when the budget covers both payments", async () => {
+            paymentRequirements = [base(), solana()];
+            expect(await paying({ evm: EVM_KEY, svm: SVM_KEY }, { budgetAtomic: 200n }, { "eip155:8453": "refused" })).toBe(200);
+            expect(signedNetworks()).toEqual(["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"]);
         });
     });
 

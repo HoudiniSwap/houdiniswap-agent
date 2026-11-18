@@ -19,11 +19,16 @@ automatically with either.
 ## Payment safety
 
 Payment terms arrive from the server in the 402 challenge, so the client bounds what it will sign:
-**USDC on Base or Solana only (for the keys given), up to $0.10 per call** by default. A server
-asking for more — or for a different asset or chain — is refused rather than signed.
+**USDC on Base or Solana only (for the keys given), paid to HoudiniSwap's addresses
+(`DEFAULT_X402_PAY_TO`), up to $0.10 per call and $10 per client** by default. A server asking for
+more — or for a different asset, chain or recipient — is refused rather than signed. Every signed
+payment counts toward the $10, including one refused on the first network before the other is
+tried.
 
 ```ts
 createX402Fetch(key, { maxPaymentAtomic: 10_000n })  // tighten to $0.01
+createX402Fetch(key, { budgetAtomic: 50_000_000n })  // allow $50 in total
+createX402Fetch(key, { payTo: { base: ["0x…"] } })   // another HoudiniSwap environment
 ```
 
 Payments are serialised with a ~5s floor between them: the facilitator settles each on-chain, and

@@ -3,3 +3,4 @@ export { BASE_NETWORK, SOLANA_NETWORK, USDC_BASE, USDC_SOLANA } from "./constant
 export { createX402Fetch, isSvmSecretKey, isX402Network } from "./x402.js";
 export type { X402Keys, X402Options } from "./x402.js";
 export type * from "./types.js";
+export { DEFAULT_X402_PAY_TO } from "./x402.js";

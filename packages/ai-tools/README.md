@@ -67,6 +67,7 @@ createHoudiniTools({ auth: { type: "apiKey", key: "id:secret" } })  // partner k
 ```
 
 Paid calls are serialised ~5s apart — the facilitator settles each payment on-chain and two at once
-from the same wallet fail. A payment ceiling of $0.10 per call is enforced client-side.
+from the same wallet fail. Client-side, payments go only to HoudiniSwap's addresses, at most $0.10
+per call and $10 per client (`x402: { budgetAtomic }` in the config changes that).
 
 MIT · [Source](https://github.com/HoudiniSwap/houdiniswap-agent)
