@@ -98,6 +98,9 @@ None is strictly required — the server starts without any of them, but every t
 - **A payment ceiling is enforced client-side.** The signer only accepts USDC on Base or Solana
   (for the keys you set), paid to HoudiniSwap's addresses, up to $0.10 per call and $10 per run
   (`HOUDINI_X402_BUDGET_USDC`), so a misconfigured or hostile endpoint cannot drain the wallet.
+  The $10 lasts until the server restarts; in HTTP mode one budget is shared by every caller.
+  Every signed payment counts, so with an empty Base wallet and a funded Solana one each call
+  signs twice (refused on Base, then paid on Solana) and the $10 covers about $5 of calls.
 - **HTTP mode binds loopback only** and has no authentication. Put an authenticating proxy in front
   of it before exposing it. `/mcp` answers only to the loopback names and `HOUDINI_HTTP_HOST`
   (plus `HOUDINI_HTTP_ALLOWED_HOSTS`); a request addressed to any other host name gets a 403.

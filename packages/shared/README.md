@@ -23,7 +23,12 @@ Payment terms arrive from the server in the 402 challenge, so the client bounds 
 (`DEFAULT_X402_PAY_TO`), up to $0.10 per call and $10 per client** by default. A server asking for
 more — or for a different asset, chain or recipient — is refused rather than signed. Every signed
 payment counts toward the $10, including one refused on the first network before the other is
-tried.
+tried: with an empty Base wallet and a funded Solana one, each call signs twice. The budget lasts
+as long as the client (or `createX402Fetch` result); a long-running server that keeps one needs a
+new client, or a higher `budgetAtomic`, once it is spent.
+
+**Changed in 0.1.12:** the recipient pin and the $10 budget are new. A client pointed at another
+HoudiniSwap environment (`baseUrl`) is now refused there until its addresses are passed as `payTo`.
 
 ```ts
 createX402Fetch(key, { maxPaymentAtomic: 10_000n })  // tighten to $0.01

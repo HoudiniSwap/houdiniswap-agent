@@ -163,6 +163,9 @@ jobs:
               echo "→ publishing $name@$local_version (registry has ${remote_version:-nothing})"
               # --ignore-scripts: prepublishOnly would rebuild, and dist/
               # already holds the build that was tested.
+              # --ignore-scripts also means nothing rebuilds a missing dist/, and a
+              # version published without its build can never be published again.
+              [ -f dist/index.js ] || { echo "✗ $name: no dist/index.js, refusing to publish" >&2; exit 1; }
               npm publish --ignore-scripts
               echo "  published $name@$local_version"
             fi

@@ -27,6 +27,14 @@ export const isSvmSecretKey = (value: string): boolean => {
  * The addresses HoudiniSwap's production API takes x402 payments at. A 402
  * naming any other recipient is refused. Other environments use other wallets:
  * pass `payTo` for them.
+ *
+ * These mirror the backend's X402_RECEIVING_ADDRESS and
+ * X402_SOLANA_RECEIVING_ADDRESS. Changing either in production before installed
+ * clients know the new address makes every one of them refuse to pay on that
+ * network, and a client with only a Solana key loses every paid call. To rotate:
+ * add the new address here next to the old one (several per network are
+ * accepted), release, let clients update, then switch the backend, and only
+ * drop the old address in a later release.
  */
 export const DEFAULT_X402_PAY_TO: Readonly<Record<X402Network, readonly string[]>> = {
     base: ["0xe2FBF4e7F29Ad53F0D28BCbCF4088277C9916eAC"],
@@ -254,9 +262,10 @@ export const createX402Fetch = (keys: `0x${string}` | X402Keys, options: X402Opt
             return {
                 abort: true,
                 reason:
-                    `${SPENDING_LIMIT}: this session has signed ${usdc(spentAtomic)} of payments and the next one ` +
-                    `(${usdc(amount)}) would pass the ${usdc(budgetAtomic)} limit. Start a new session, or raise the limit ` +
-                    "with the budgetAtomic option (HOUDINI_X402_BUDGET_USDC for the MCP server).",
+                    `${SPENDING_LIMIT}: this client has signed ${usdc(spentAtomic)} of payments and the next one ` +
+                    `(${usdc(amount)}) would pass the ${usdc(budgetAtomic)} limit. The limit lasts as long as the client: ` +
+                    "restart the MCP server (in HTTP mode it is shared by every caller), or create a new client. " +
+                    "To allow more, raise it with HOUDINI_X402_BUDGET_USDC for the MCP server, or the budgetAtomic option.",
             };
         }
     });
