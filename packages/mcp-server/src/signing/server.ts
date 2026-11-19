@@ -1,6 +1,12 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomBytes } from "node:crypto";
-import { renderSignPage, renderSignedPage, type OrderFacts, type SignableTransaction } from "./page.js";
+import {
+    renderReplacedPage,
+    renderSignPage,
+    renderSignedPage,
+    type OrderFacts,
+    type SignableTransaction,
+} from "./page.js";
 
 /**
  * A loopback signer for DEX transactions, so a user never has to paste a private
@@ -22,6 +28,21 @@ export interface PendingSignature {
     status: SignStatus;
     txHash?: string;
     error?: string;
+    /**
+     * Token of a newer request for the same order. The old link then serves a
+     * "replaced" notice instead of the form, but still records a hash: a send
+     * already under way in that tab must not be lost.
+     */
+    replacedBy?: string;
+}
+
+export interface SignRequest extends PendingSignature {
+    url: string;
+    /**
+     * The order already has a recorded transaction, so no new link was minted:
+     * this is that earlier entry, hash included.
+     */
+    alreadySigned: boolean;
 }
 
 const HOST = "127.0.0.1";
@@ -45,6 +66,13 @@ export class SigningServer {
     /**
      * Registers a transaction and returns the URL to open. Starts the listener
      * on first use — an MCP server that never does a DEX swap never opens a port.
+     *
+     * Single use per order, not per link. An agent calls the tool again exactly
+     * when it is unsure whether the first send went through, and the order
+     * stays at "waiting" until the backend sees the transaction — a fresh form
+     * then would be a second transfer. So an order that already has a hash gets
+     * that entry back instead of a new link, and any older link for the order
+     * is retired, so only one form is live at a time.
      */
     async request(
         houdiniId: string,
@@ -52,15 +80,32 @@ export class SigningServer {
         chainId: number,
         expiresAt: number,
         order: OrderFacts = {},
-    ): Promise<PendingSignature & { url: string }> {
+    ): Promise<SignRequest> {
+        const signed = this.signedFor(houdiniId);
+        if (signed) {
+            const port = await this.ensureListening();
+            return { ...signed, url: this.urlFor(port, signed.token), alreadySigned: true };
+        }
+
         // 32 bytes: without the token the route 404s, so this is what stops
         // another local process from putting a transaction in front of the user.
         const token = randomBytes(32).toString("hex");
+        for (const older of this.pending.values()) {
+            if (older.houdiniId === houdiniId) older.replacedBy = token;
+        }
         const entry: PendingSignature = { token, houdiniId, tx, chainId, order, expiresAt, status: "pending" };
         this.pending.set(token, entry);
 
         const port = await this.ensureListening();
-        return { ...entry, url: `http://${HOST}:${port}/sign/${token}` };
+        return { ...entry, url: this.urlFor(port, token), alreadySigned: false };
+    }
+
+    /** The entry that recorded a transaction for this order, if any link did. */
+    signedFor(houdiniId: string): PendingSignature | undefined {
+        for (const entry of this.pending.values()) {
+            if (entry.houdiniId === houdiniId && entry.status === "signed") return entry;
+        }
+        return undefined;
     }
 
     status(token: string): PendingSignature | undefined {
@@ -85,6 +130,10 @@ export class SigningServer {
 
     getPort(): number | undefined {
         return this.port;
+    }
+
+    private urlFor(port: number, token: string): string {
+        return `http://${HOST}:${port}/sign/${token}`;
     }
 
     private async ensureListening(): Promise<number> {
@@ -167,10 +216,14 @@ export class SigningServer {
             // as long as it lives, and must never serve the form again. A
             // reload or second tab on the live form would broadcast the same
             // transfer twice (the second report is refused with a 409, but the
-            // transaction is already sent). "rejected" keeps the form: nothing
-            // was sent, so the user may try again.
-            if (entry.status === "signed") return this.serveSigned(res, entry);
+            // transaction is already sent). The same holds for any other link
+            // to the order: a send from an older tab settles this one too.
+            // "rejected" keeps the form: nothing was sent, so the user may try
+            // again.
+            const signed = entry.status === "signed" ? entry : this.signedFor(entry.houdiniId);
+            if (signed) return this.serveSigned(res, signed);
             if (expired) return this.notFound(res);
+            if (entry.replacedBy) return this.html(res, renderReplacedPage(entry.houdiniId));
             return this.servePage(res, entry);
         }
         if (req.method === "POST") return this.acceptResult(req, res, entry);

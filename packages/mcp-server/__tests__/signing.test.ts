@@ -256,6 +256,49 @@ describe("signing server", () => {
         expect((await post(url, { error: "late" })).status).toBe(409);
     });
 
+    // Single use per order, not per link. The order stays at "waiting" until the
+    // backend sees the transaction, which is exactly when an agent asks again;
+    // a fresh form then was a second transfer.
+    it("hands back the recorded hash instead of a new link for a signed order", async () => {
+        const s = make();
+        const first = await s.request("H1", TX, 8453, later());
+        await post(first.url, { txHash: HASH });
+        const again = await s.request("H1", TX, 8453, later());
+        expect(again.alreadySigned).toBe(true);
+        expect(again.token).toBe(first.token);
+        expect(again.txHash).toBe(HASH);
+        expect(first.alreadySigned).toBe(false);
+    });
+
+    it("retires the older link when a new one is issued for the same order", async () => {
+        const s = make();
+        const old = await s.request("H1", TX, 8453, later());
+        await post(old.url, { error: "user rejected" });
+        const fresh = await s.request("H1", TX, 8453, later());
+        expect(fresh.token).not.toBe(old.token);
+
+        const html = await (await fetch(old.url)).text();
+        expect(html).toContain("Link replaced");
+        expect(html).not.toContain("<script");
+        expect(html).not.toContain('id="go"');
+        expect(await (await fetch(fresh.url)).text()).toContain('id="go"');
+        expect(s.status(old.token)?.replacedBy).toBe(fresh.token);
+    });
+
+    // The old tab may already hold the form, and a send from it is on chain.
+    it("still records a hash from a replaced link and stops serving the newer form", async () => {
+        const s = make();
+        const old = await s.request("H1", TX, 8453, later());
+        const fresh = await s.request("H1", TX, 8453, later());
+        expect((await post(old.url, { txHash: HASH })).status).toBe(200);
+        expect(s.signedFor("H1")?.token).toBe(old.token);
+
+        const html = await (await fetch(fresh.url)).text();
+        expect(html).toContain("already been sent");
+        expect(html).toContain(HASH);
+        expect(html).not.toContain('id="go"');
+    });
+
     it("renders the signed notice without a link on an unknown chain", () => {
         const html = renderSignedPage("H1", 999, HASH);
         expect(html).toContain(HASH);

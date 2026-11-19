@@ -131,13 +131,6 @@ const refusedBeforeSettlement = (res: Response, accepted?: { extra?: Record<stri
 };
 
 /**
- * A `fetch` that pays for 402 responses. A bare `0x` key pays on Base, as
- * before; `{ evm, svm }` pays with whichever wallets are given. With both,
- * `preferredNetwork` is tried first, or else the first network the server
- * offers (it lists Base first), and a payment refused there before settlement
- * is retried once on the other network.
- */
-/**
  * Thrown when a request carrying a signed payment fails without an answer:
  * the payment may already be settled and the request carried out (an order
  * created, say), so the caller must not treat it as a plain failure and retry.
@@ -155,6 +148,13 @@ export class X402PaymentUnconfirmedError extends Error {
     }
 }
 
+/**
+ * A `fetch` that pays for 402 responses. A bare `0x` key pays on Base, as
+ * before; `{ evm, svm }` pays with whichever wallets are given. With both,
+ * `preferredNetwork` is tried first, or else the first network the server
+ * offers (it lists Base first), and a payment refused there before settlement
+ * is retried once on the other network.
+ */
 export const createX402Fetch = (keys: `0x${string}` | X402Keys, options: X402Options = {}): typeof fetch => {
     const { evm, svm } = typeof keys === "string" ? { evm: keys, svm: undefined } : keys;
     if (!evm && !svm) throw new Error("createX402Fetch needs an EVM key, a Solana key, or both");

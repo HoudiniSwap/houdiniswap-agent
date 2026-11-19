@@ -408,7 +408,8 @@ describe("request timeout", () => {
         vi.useFakeTimers();
         mockFetch.mockImplementation((_u: string, init?: RequestInit) =>
             new Promise((_res, rej) => {
-                init?.signal?.addEventListener("abort", () => rej(new Error("aborted")));
+                // What fetch throws when its signal fires.
+                init?.signal?.addEventListener("abort", () => rej(new DOMException("aborted", "AbortError")));
             }));
         const client = new HoudiniClient({ auth: { type: "none" }, timeoutMs: 5_000 });
         const p = client.get("/tokens").then(() => "resolved", (e: Error) => e.message);
@@ -433,6 +434,24 @@ describe("request timeout", () => {
         const p = client.post("/exchanges", {}).then(() => "resolved", (e: Error) => e.message);
         await vi.advanceTimersByTimeAsync(61_000);
         expect(await p).toBe("payment may have been taken");
+        vi.useRealTimers();
+    });
+
+    // Only the timer's own abort is a timeout. A payment refused after a long
+    // wait in the payment queue (a spending limit, say) surfaces after this
+    // bound too, and calling it "timed out" sent the agent to retry.
+    it("does not relabel a late error that is not an abort", async () => {
+        vi.useFakeTimers();
+        mockFetch.mockImplementation(
+            () =>
+                new Promise((_res, rej) => {
+                    setTimeout(() => rej(new Error("x402: spending limit reached")), 10_000);
+                }),
+        );
+        const client = new HoudiniClient({ auth: { type: "none" }, timeoutMs: 5_000 });
+        const p = client.get("/tokens").then(() => "resolved", (e: Error) => e.message);
+        await vi.advanceTimersByTimeAsync(11_000);
+        expect(await p).toBe("x402: spending limit reached");
         vi.useRealTimers();
     });
 
