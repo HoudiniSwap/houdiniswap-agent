@@ -88,9 +88,15 @@ describe("compactToken", () => {
         expect((compactToken(scanned) as any).securityScan).toEqual({
             resultType: "Malicious",
             featureIds: ["KNOWN_MALICIOUS", "HONEYPOT"],
+            expiresAt: "2026-11-25T00:00:00.000Z",
         });
         const list = compactTokenResult({ total: 1, tokens: [scanned] }) as any;
         expect(list.tokens[0].securityScan.resultType).toBe("Malicious");
+    });
+
+    it("keeps the admin warningMessage", () => {
+        const warned = { ...token, warningMessage: "Deposits paused on this chain" };
+        expect((compactToken(warned) as any).warningMessage).toBe("Deposits paused on this chain");
     });
 
     it("omits securityScan when the token has none", () => {

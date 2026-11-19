@@ -32,6 +32,9 @@ const TOKEN_KEYS = [
     // unverified token, which it cannot do if this is stripped. Absent on
     // verified tokens, so it costs nothing on the common path.
     "unverified",
+    // Admin-set text the site shows before a swap of this token. Same topic as
+    // `unverified`; absent on almost every token.
+    "warningMessage",
     "hasCex",
     "hasDex",
     "hasSelfPrivate",
@@ -40,8 +43,10 @@ const TOKEN_KEYS = [
 
 /**
  * A token's security verdict, cut to what the skill branches on: `resultType`
- * (Benign | Warning | Malicious | Unscanned) and the ids of the findings, which
- * are short enough to show the user. Provider name, scores and timestamps go.
+ * (Benign | Warning | Malicious | Unscanned), the ids of the findings, which
+ * are short enough to show the user, and `expiresAt` — a token list returns
+ * stored verdicts without re-screening them, and a past `expiresAt` is the only
+ * sign that one is stale. Provider name and scores go.
  */
 export const compactScan = (scan: unknown): unknown => {
     if (!scan || typeof scan !== "object") return undefined;
@@ -54,6 +59,7 @@ export const compactScan = (scan: unknown): unknown => {
             .filter((id): id is string => typeof id === "string");
         if (featureIds.length) out.featureIds = featureIds;
     }
+    if (typeof source.expiresAt === "string" && source.expiresAt) out.expiresAt = source.expiresAt;
     return out;
 };
 

@@ -334,7 +334,8 @@ swap({
 
 > ⚠️ **`swap` is exempt from Critical Rules 5-7 and can create a private order.**
 > It picks the token and the route itself and creates the order in a single call,
-> so there is no menu, no unverified-token or security-verdict warning and no price-impact check — and
+> so there is no menu, no unverified-token or `Warning`-verdict warning and no price-impact check
+> (it does refuse a token whose verdict is `Malicious`) — and
 > it returns neither `amountOutUsd` (so impact cannot be computed after the fact)
 > nor `displayStatus` (only the numeric `status`). It also quotes without a
 > `types` filter and takes the best non-DEX route, so **if a private route wins it
@@ -355,9 +356,11 @@ address before swapping. Scam tokens may impersonate legitimate projects.
 Do NOT proceed with the swap until the user explicitly acknowledges the risk.
 
 ### Token Security Verdict
-Tokens from `getTokens` can carry `securityScan: { resultType, featureIds }`, and
-`getQuote` returns `fromTokenScan` / `toTokenScan` for the two tokens being
-quoted. Check both, the quote's being the most recent. Branch on `resultType` only:
+Tokens from `getTokens` can carry `securityScan: { resultType, featureIds, expiresAt }`,
+and `getQuote` returns `fromTokenScan` / `toTokenScan` for the two tokens being
+quoted. Check both, the quote's being the most recent (a `getTokens` verdict with a
+past `expiresAt` is stale). A token can also carry `warningMessage` — show it
+verbatim before the route menu. Branch on `resultType` only:
 
 - **`Malicious`** — do NOT swap. Tell the user:
   ```
