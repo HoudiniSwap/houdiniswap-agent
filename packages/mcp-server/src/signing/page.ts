@@ -145,6 +145,75 @@ export const summarise = (
     return rows;
 };
 
+const EXPLORERS: Record<number, string> = {
+    1: "https://etherscan.io",
+    10: "https://optimistic.etherscan.io",
+    56: "https://bscscan.com",
+    137: "https://polygonscan.com",
+    8453: "https://basescan.org",
+    42161: "https://arbiscan.io",
+    43114: "https://snowtrace.io",
+};
+
+/** A static page: no script and no wallet code, so it can never send anything. */
+const noticePage = (heading: string, body: string): string => `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(heading)} · HoudiniSwap</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin:0; padding:2rem 1rem; font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }
+  main { max-width:44rem; margin:0 auto; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; word-break:break-all; }
+</style>
+</head>
+<body>
+<main>
+  <h1>${esc(heading)}</h1>
+  ${body}
+</main>
+</body>
+</html>`;
+
+/**
+ * Served instead of the form once a transaction has been sent for the order,
+ * from this link or another one, so reloading or reopening a link cannot send
+ * it a second time.
+ */
+export const renderSignedPage = (
+    houdiniId: string,
+    chainId: number,
+    txHash: string | undefined,
+    order: OrderFacts = {},
+): string => {
+    const heading = order.depositAddress !== undefined ? "Deposit sent" : "Swap signed";
+    const base = EXPLORERS[chainId];
+    // txHash is validated as 0x + 64 hex before it is stored; esc() anyway.
+    const hash = txHash
+        ? base
+            ? `<a href="${esc(base)}/tx/${esc(txHash)}" rel="noreferrer noopener">${esc(txHash)}</a>`
+            : esc(txHash)
+        : "";
+    return noticePage(
+        heading,
+        `<p>Order <code>${esc(houdiniId)}</code> has already been sent. Nothing more is needed here and it cannot be sent again. You can close this tab.</p>
+  ${hash ? `<p>Transaction: <code>${hash}</code></p>` : ""}`,
+    );
+};
+
+/**
+ * Served on an older link once a newer one was issued for the same order, so
+ * only one form per order is ever live.
+ */
+export const renderReplacedPage = (houdiniId: string): string =>
+    noticePage(
+        "Link replaced",
+        `<p>A newer signing link was issued for order <code>${esc(houdiniId)}</code>, so this one no longer offers the transaction. Use the most recent link you were given.</p>
+  <p>If you already sent the transaction from this page, nothing more is needed — do not send it again.</p>`,
+    );
+
 export const renderSignPage = (
     tx: SignableTransaction,
     chainId: number,

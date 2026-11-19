@@ -106,6 +106,22 @@ describe("dexSignRequest against the real order shape", () => {
         expect(out.error).toContain("no signable transaction");
     });
 
+    // Past waiting, the swap was already sent; a fresh page would let the same
+    // transaction go out a second time.
+    it("refuses an order that is past waiting for its transaction", async () => {
+        const out = await callSign({ ...RAW_ORDER, status: 1 });
+        expect(out.url).toBeUndefined();
+        expect(out.error).toMatch(/past waiting/);
+    });
+
+    it("falls back to a bounded expiry when expires is unparseable", async () => {
+        const out = await callSign({ ...RAW_ORDER, expires: "not a date" });
+        expect(out.error).toBeUndefined();
+        const expiresAt = Date.parse(out.expiresAt);
+        expect(expiresAt).toBeGreaterThan(Date.now());
+        expect(expiresAt).toBeLessThanOrEqual(Date.now() + 15 * 60_000);
+    });
+
     it("reports plainly when the chain cannot be determined", async () => {
         const out = await callSign({ ...RAW_ORDER, inToken: { symbol: "USDC" } });
         expect(out.error).toContain("Could not determine the chain");
@@ -225,6 +241,48 @@ describe("dexSignStatus", () => {
         expect(status.status).toBe("signed");
         expect(status.txHash).toBe(hash);
         expect(status.next).toContain(RAW_ORDER.houdiniId);
+        await t.close();
+        await signer.close();
+    });
+
+    // An agent unsure whether the first send went through asks again while the
+    // order is still waiting; that must not hand the user a second live form.
+    it("answers a second request for a signed order with the earlier hash", async () => {
+        const signer = new SigningServer();
+        const t = await driveTools(signer);
+        const req = await t.call("dexSignRequest", { houdiniId: RAW_ORDER.houdiniId });
+        const hash = `0x${"b".repeat(64)}`;
+        await fetch(req.url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Origin: new URL(req.url).origin },
+            body: JSON.stringify({ txHash: hash }),
+        });
+
+        const again = await t.call("dexSignRequest", { houdiniId: RAW_ORDER.houdiniId });
+        expect(again.alreadySent).toBe(true);
+        expect(again.txHash).toBe(hash);
+        expect(again.url).toBeUndefined();
+        expect(again.next).toContain("dexConfirmTx");
+        await t.close();
+        await signer.close();
+    });
+
+    it("reports the newer token as signed when the user sent from the older link", async () => {
+        const signer = new SigningServer();
+        const t = await driveTools(signer);
+        const old = await t.call("dexSignRequest", { houdiniId: RAW_ORDER.houdiniId });
+        const fresh = await t.call("dexSignRequest", { houdiniId: RAW_ORDER.houdiniId });
+        expect((await t.call("dexSignStatus", { token: old.token })).replacedBy).toBe(fresh.token);
+
+        const hash = `0x${"c".repeat(64)}`;
+        await fetch(old.url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Origin: new URL(old.url).origin },
+            body: JSON.stringify({ txHash: hash }),
+        });
+        const status = await t.call("dexSignStatus", { token: fresh.token });
+        expect(status.status).toBe("signed");
+        expect(status.txHash).toBe(hash);
         await t.close();
         await signer.close();
     });
