@@ -18,7 +18,7 @@ HoudiniSwap aggregates 14 CEXes and 20+ DEXes across multiple blockchains. This 
 
 ### With x402 (no signup needed)
 
-Pay per request with USDC on Base or Solana. No API key registration required. To pay on Solana, set `HOUDINI_X402_SVM_PRIVATE_KEY` (the base58 key Phantom or Solflare export) instead of, or as well as, the EVM key below. Keep the key line for each wallet you pay from and delete the other. With both keys, set `HOUDINI_X402_NETWORK=solana` to pay on Solana first; a payment refused on one network before it settles is retried on the other, and a call is never charged twice. `@latest` picks up new releases when the client restarts the server.
+Pay per request with USDC on Base or Solana. No API key registration required. To pay on Solana, set `HOUDINI_X402_SVM_PRIVATE_KEY` (the base58 key Phantom or Solflare export) instead of, or as well as, the EVM key below. Keep the key line for each wallet you pay from and delete the other. With both keys, set `HOUDINI_X402_NETWORK=solana` to pay on Solana first; a payment refused on one network before it settles is retried on the other, and a call is never charged twice.
 
 **Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
 ```json
@@ -26,7 +26,7 @@ Pay per request with USDC on Base or Solana. No API key registration required. T
   "mcpServers": {
     "houdiniswap": {
       "command": "npx",
-      "args": ["-y", "@houdiniswap/mcp-server@latest"],
+      "args": ["-y", "@houdiniswap/mcp-server"],
       "env": {
         "HOUDINI_X402_PRIVATE_KEY": "0xYOUR_EVM_PRIVATE_KEY",
         "HOUDINI_X402_SVM_PRIVATE_KEY": "YOUR_SOLANA_PRIVATE_KEY"
@@ -42,7 +42,7 @@ Pay per request with USDC on Base or Solana. No API key registration required. T
   "mcpServers": {
     "houdiniswap": {
       "command": "npx",
-      "args": ["-y", "@houdiniswap/mcp-server@latest"],
+      "args": ["-y", "@houdiniswap/mcp-server"],
       "env": {
         "HOUDINI_X402_PRIVATE_KEY": "0xYOUR_EVM_PRIVATE_KEY",
         "HOUDINI_X402_SVM_PRIVATE_KEY": "YOUR_SOLANA_PRIVATE_KEY"
@@ -55,9 +55,9 @@ Pay per request with USDC on Base or Solana. No API key registration required. T
 **Claude Code — MCP server only:**
 ```bash
 # Pay with USDC on Base:
-claude mcp add houdiniswap --env HOUDINI_X402_PRIVATE_KEY=0x... -- npx -y @houdiniswap/mcp-server@latest
+claude mcp add houdiniswap --env HOUDINI_X402_PRIVATE_KEY=0x... -- npx -y @houdiniswap/mcp-server
 # Pay with USDC on Solana:
-claude mcp add houdiniswap --env HOUDINI_X402_SVM_PRIVATE_KEY=<base58 key> -- npx -y @houdiniswap/mcp-server@latest
+claude mcp add houdiniswap --env HOUDINI_X402_SVM_PRIVATE_KEY=<base58 key> -- npx -y @houdiniswap/mcp-server
 # Both: pass both --env flags, plus --env HOUDINI_X402_NETWORK=solana to pay on Solana first
 ```
 

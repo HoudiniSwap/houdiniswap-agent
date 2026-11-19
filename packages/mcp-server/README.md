@@ -33,9 +33,9 @@ That installs the swap skill *and* wires up this server. Or, MCP server only:
 
 ```bash
 # Pay with USDC on Base:
-claude mcp add houdiniswap --env HOUDINI_X402_PRIVATE_KEY=0x... -- npx -y @houdiniswap/mcp-server@latest
+claude mcp add houdiniswap --env HOUDINI_X402_PRIVATE_KEY=0x... -- npx -y @houdiniswap/mcp-server
 # Pay with USDC on Solana:
-claude mcp add houdiniswap --env HOUDINI_X402_SVM_PRIVATE_KEY=<base58 key> -- npx -y @houdiniswap/mcp-server@latest
+claude mcp add houdiniswap --env HOUDINI_X402_SVM_PRIVATE_KEY=<base58 key> -- npx -y @houdiniswap/mcp-server
 # Both: pass both --env flags, plus --env HOUDINI_X402_NETWORK=solana to pay on Solana first
 ```
 
@@ -46,7 +46,7 @@ claude mcp add houdiniswap --env HOUDINI_X402_SVM_PRIVATE_KEY=<base58 key> -- np
   "mcpServers": {
     "houdiniswap": {
       "command": "npx",
-      "args": ["-y", "@houdiniswap/mcp-server@latest"],
+      "args": ["-y", "@houdiniswap/mcp-server"],
       "env": {
         "HOUDINI_X402_PRIVATE_KEY": "0xYOUR_EVM_PRIVATE_KEY",
         "HOUDINI_X402_SVM_PRIVATE_KEY": "YOUR_SOLANA_PRIVATE_KEY"
@@ -57,8 +57,7 @@ claude mcp add houdiniswap --env HOUDINI_X402_SVM_PRIVATE_KEY=<base58 key> -- np
 ```
 
 Keep the key line for each wallet you pay from and delete the other; `HOUDINI_X402_NETWORK` (below) picks
-the network paid on first when both are set. `@latest` picks up new releases when the client restarts
-the server.
+the network paid on first when both are set.
 
 The `-y` matters: without it npx prompts on stdin, which for a stdio MCP server is the JSON-RPC
 channel, and the server never starts.
