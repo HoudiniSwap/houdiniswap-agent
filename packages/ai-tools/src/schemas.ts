@@ -60,7 +60,7 @@ export const exchangeSchema = z.object({
             z.object({
                 signature: z.string(),
                 key: z.string(),
-                swapRequiredMetadata: z.record(z.unknown()).optional(),
+                swapRequiredMetadata: z.record(z.string(), z.unknown()).optional(),
             }),
         )
         .optional()
@@ -121,7 +121,7 @@ export const dexChainSignaturesSchema = z.object({
         .object({
             signature: z.string(),
             key: z.string(),
-            swapRequiredMetadata: z.record(z.unknown()).optional(),
+            swapRequiredMetadata: z.record(z.string(), z.unknown()).optional(),
         })
         .describe("The signature object produced by the wallet in the previous step"),
     signatureKey: z.string().describe("Signature key returned by the previous approve or chainSignatures call"),
