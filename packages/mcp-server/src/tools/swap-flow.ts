@@ -11,6 +11,15 @@ import { asToolResult } from "../shape.js";
 const pickToken = (tokens?: Token[]): Token | undefined =>
     tokens?.find(t => t.mainnet) ?? tokens?.[0];
 
+type Scan = { resultType?: unknown };
+
+// The quote's verdict is the freshest; the token list returns stored ones
+// without re-screening, so it is only the fallback.
+const isMalicious = (quoteScan: unknown, token: Token): boolean => {
+    const scan = (quoteScan ?? (token as Token & { securityScan?: unknown }).securityScan) as Scan | undefined;
+    return scan?.resultType === "Malicious";
+};
+
 export const registerSwapFlowTool = (server: McpServer, client: HoudiniClient) => {
     server.tool(
         "swap",
@@ -86,6 +95,27 @@ export const registerSwapFlowTool = (server: McpServer, client: HoudiniClient) =
                 }
 
                 const bestQuote = cexQuotes[0];
+
+                // The API never refuses a flagged token; the skill asks the agent
+                // to, but this tool creates the order in the same call, so the
+                // agent never gets the chance. Refuse here and leave an explicit
+                // override to the step-by-step flow.
+                const scans = quoteResult as QuoteResult & { fromTokenScan?: unknown; toTokenScan?: unknown };
+                const flagged = [
+                    isMalicious(scans.fromTokenScan, fromToken) ? `${fromSymbol} on ${fromChain}` : undefined,
+                    isMalicious(scans.toTokenScan, toToken) ? `${toSymbol} on ${toChain}` : undefined,
+                ].filter(Boolean);
+                if (flagged.length) {
+                    return {
+                        content: [{
+                            type: "text",
+                            text: JSON.stringify({
+                                error: `No order created: ${flagged.join(" and ")} was flagged as Malicious by a token security scan. Swapping it is very likely to lose funds. Tell the user; if they explicitly insist on this exact token, use getQuote and createExchange instead.`,
+                            }),
+                        }],
+                        isError: true,
+                    };
+                }
 
                 // Step 4: Create exchange
                 const order = await client.post<Order>("/exchanges", {
