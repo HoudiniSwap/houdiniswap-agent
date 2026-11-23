@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { HoudiniClient, Order } from "@houdiniswap/agent-shared";
 import { z } from "zod";
 import { asToolResult } from "../shape.js";
-import { SigningServer } from "../signing/server.js";
+import { SigningServer, type PendingSignature, type SignRequest } from "../signing/server.js";
 import type { SignableTransaction } from "../signing/page.js";
 import { erc20TransferData, isEvmAddress, toBaseUnits } from "../units.js";
 
@@ -18,6 +18,32 @@ interface RawToken {
 /** GET /orders/:id nests the chain under chainData; the shaped order flattens it. */
 const chainIdOf = (token: RawToken | undefined): number | undefined =>
     token?.chainData?.chainId ?? token?.chainId;
+
+/**
+ * What the agent does once a transaction is recorded. A CEX deposit has no
+ * transaction to confirm: the exchange watches its own address and credits the
+ * order itself. Sending the agent to dexConfirmTx there would charge the
+ * exchange tier ($0.01) for a call that does not apply to the order.
+ */
+const nextAfterSigned = (entry: PendingSignature): string =>
+    entry.order.depositAddress
+        ? `Deposit sent. The exchange credits it once the transfer confirms — follow the order with getOrder using id "${entry.houdiniId}". Do not call dexConfirmTx; that is for DEX orders.`
+        : `Call dexConfirmTx with id "${entry.houdiniId}" and this txHash.`;
+
+/**
+ * A second request for an order that already has a recorded transaction gets
+ * that transaction back, not a new link: the order stays at "waiting" until the
+ * backend sees it, and that is exactly when an agent asks again.
+ */
+const alreadySent = (pending: SignRequest) =>
+    asToolResult({
+        status: "signed",
+        alreadySent: true,
+        token: pending.token,
+        txHash: pending.txHash,
+        error: `A transaction for order ${pending.houdiniId} was already sent from an earlier link. Do not send it again.`,
+        next: nextAfterSigned(pending),
+    });
 
 /**
  * Browser signing for DEX swaps, so a user is never asked to paste a private key
@@ -73,6 +99,14 @@ export const registerSigningTools = (
                 });
             }
 
+            // Same rule as cexDepositRequest: once the order has moved on, the
+            // swap was already sent, and a fresh page would let it go out twice.
+            if (typeof order.status === "number" && order.status > 0) {
+                return asToolResult({
+                    error: `Order ${houdiniId} is past waiting for its transaction (status ${order.status}). Do not sign again — read the order with getOrder to see where it is.`,
+                });
+            }
+
             // `value` is only ever validated here. It reaches BigInt on both
             // sides — the summary and the wallet call — and BigInt throws on
             // anything that is not an integer literal, including "1e+21",
@@ -99,7 +133,11 @@ export const registerSigningTools = (
                 return asToolResult({ error: `Could not determine the chain for order ${houdiniId}.` });
             }
 
-            const expiresAt = order.expires ? Date.parse(order.expires) : Date.now() + 15 * 60_000;
+            // An unparseable `expires` must not become NaN: every comparison
+            // against it is false, so the entry would never expire, and
+            // toISOString() below would throw after the entry was registered.
+            const declared = order.expires ? Date.parse(order.expires) : Number.NaN;
+            const expiresAt = Number.isNaN(declared) ? Date.now() + 15 * 60_000 : declared;
             // So the page can show what the swap does, not just where the
             // calldata points. Every router encodes its swap differently, so
             // these come from the order rather than from decoding `data`.
@@ -113,6 +151,7 @@ export const registerSigningTools = (
                 outSymbol: outToken?.symbol ?? order.outSymbol,
                 receiverAddress: order.receiverAddress,
             });
+            if (pending.alreadySigned) return alreadySent(pending);
 
             return asToolResult({
                 url: pending.url,
@@ -225,6 +264,7 @@ export const registerSigningTools = (
                 receiverAddress: order.receiverAddress,
                 depositAddress,
             });
+            if (pending.alreadySigned) return alreadySent(pending);
 
             return asToolResult({
                 url: pending.url,
@@ -246,13 +286,17 @@ export const registerSigningTools = (
             token: z.string().describe("The token returned by dexSignRequest"),
         },
         async ({ token }) => {
-            const entry = signer.status(token);
-            if (!entry) {
+            const own = signer.status(token);
+            if (!own) {
                 return asToolResult({
                     status: "expired",
                     error: "Unknown or expired token. Call dexSignRequest again to get a fresh link.",
                 });
             }
+            // A send from another link to the same order settles this one too:
+            // the agent may be polling the newer token while the user finished
+            // in the older tab.
+            const entry = own.status === "signed" ? own : (signer.signedFor(own.houdiniId) ?? own);
             // entry.error is third-party text: a wallet message, or a revert
             // string chosen by whatever contract the route calls. It is quoted
             // and labelled rather than passed through bare, because it lands in
@@ -274,17 +318,13 @@ export const registerSigningTools = (
                 ...(entry.txHash ? { txHash: entry.txHash } : {}),
                 ...reported,
                 ...(entry.status === "signed"
-                    ? {
-                          // A CEX deposit has no transaction to confirm: the
-                          // exchange watches its own address and credits the
-                          // order itself. Sending the agent to dexConfirmTx
-                          // there would charge the exchange tier ($0.01) for a
-                          // call that does not apply to the order.
-                          next: entry.order.depositAddress
-                              ? `Deposit sent. The exchange credits it once the transfer confirms — follow the order with getOrder using id "${entry.houdiniId}". Do not call dexConfirmTx; that is for DEX orders.`
-                              : `Call dexConfirmTx with id "${entry.houdiniId}" and this txHash.`,
-                      }
-                    : {}),
+                    ? { next: nextAfterSigned(entry) }
+                    : entry.replacedBy
+                      ? {
+                            replacedBy: entry.replacedBy,
+                            next: "A newer link was issued for this order and this one no longer offers the transaction. Poll dexSignStatus with the replacedBy token.",
+                        }
+                      : {}),
             });
         },
     );

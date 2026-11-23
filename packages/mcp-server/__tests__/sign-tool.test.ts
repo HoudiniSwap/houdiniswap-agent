@@ -106,6 +106,22 @@ describe("dexSignRequest against the real order shape", () => {
         expect(out.error).toContain("no signable transaction");
     });
 
+    // Past waiting, the swap was already sent; a fresh page would let the same
+    // transaction go out a second time.
+    it("refuses an order that is past waiting for its transaction", async () => {
+        const out = await callSign({ ...RAW_ORDER, status: 1 });
+        expect(out.url).toBeUndefined();
+        expect(out.error).toMatch(/past waiting/);
+    });
+
+    it("falls back to a bounded expiry when expires is unparseable", async () => {
+        const out = await callSign({ ...RAW_ORDER, expires: "not a date" });
+        expect(out.error).toBeUndefined();
+        const expiresAt = Date.parse(out.expiresAt);
+        expect(expiresAt).toBeGreaterThan(Date.now());
+        expect(expiresAt).toBeLessThanOrEqual(Date.now() + 15 * 60_000);
+    });
+
     it("reports plainly when the chain cannot be determined", async () => {
         const out = await callSign({ ...RAW_ORDER, inToken: { symbol: "USDC" } });
         expect(out.error).toContain("Could not determine the chain");
@@ -189,6 +205,73 @@ describe("swap composite on an unexpected envelope", () => {
     });
 });
 
+describe("swap composite and token security verdicts", () => {
+    const BTC = { id: "btc", symbol: "BTC", mainnet: true };
+    const ETH = { id: "eth", symbol: "ETH", mainnet: true };
+    const drive = async (opts: { quoteScans?: Record<string, unknown>; ethScan?: unknown }) => {
+        const posts: string[] = [];
+        const client = {
+            get: async (path: string, params: Record<string, unknown>) => {
+                if (path === "/tokens") {
+                    const tok = params.symbol === "BTC" ? BTC : { ...ETH, securityScan: opts.ethScan };
+                    return { total: 1, tokens: [tok] };
+                }
+                if (path === "/minMax") return {};
+                return {
+                    quotes: [{ quoteId: "q1", type: "standard", amountOut: 30, swapName: "X" }],
+                    ...opts.quoteScans,
+                };
+            },
+            post: async (path: string) => {
+                posts.push(path);
+                return { houdiniId: "h1", status: 0, depositAddress: "bc1qdeposit" };
+            },
+        } as unknown as HoudiniClient;
+        const server = new McpServer({ name: "t", version: "1" });
+        const { registerSwapFlowTool } = await import("../src/tools/swap-flow.js");
+        registerSwapFlowTool(server, client);
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        await server.connect(st);
+        const c = new Client({ name: "t", version: "1" }, { capabilities: {} });
+        await c.connect(ct);
+        const res = await c.callTool({
+            name: "swap",
+            arguments: { fromSymbol: "BTC", fromChain: "bitcoin", toSymbol: "ETH", toChain: "ethereum", amount: 1, addressTo: "0xabc" },
+        });
+        await c.close();
+        return { res, out: JSON.parse((res.content as Array<{ text: string }>)[0].text), posts };
+    };
+
+    it("refuses a token the quote flags as Malicious and creates no order", async () => {
+        const { res, out, posts } = await drive({ quoteScans: { toTokenScan: { resultType: "Malicious" } } });
+        expect(res.isError).toBe(true);
+        expect(out.error).toContain("ETH on ethereum");
+        expect(out.error).toContain("Malicious");
+        expect(posts).toEqual([]);
+    });
+
+    it("falls back to the token's stored verdict when the quote has none", async () => {
+        const { out, posts } = await drive({ ethScan: { resultType: "Malicious" } });
+        expect(out.error).toContain("Malicious");
+        expect(posts).toEqual([]);
+    });
+
+    it("lets the quote's fresh verdict override a stale stored one", async () => {
+        const { out, posts } = await drive({
+            ethScan: { resultType: "Malicious" },
+            quoteScans: { toTokenScan: { resultType: "Benign" } },
+        });
+        expect(out.success).toBe(true);
+        expect(posts).toEqual(["/exchanges"]);
+    });
+
+    it("still swaps a Warning token (only Malicious is refused)", async () => {
+        const { out, posts } = await drive({ quoteScans: { fromTokenScan: { resultType: "Warning" } } });
+        expect(out.success).toBe(true);
+        expect(posts).toEqual(["/exchanges"]);
+    });
+});
+
 describe("dexSignStatus", () => {
     // Had no test at all. Reducing the response to { status } drops txHash, so
     // the agent can never call dexConfirmTx: the swap is signed, paid for, and
@@ -225,6 +308,48 @@ describe("dexSignStatus", () => {
         expect(status.status).toBe("signed");
         expect(status.txHash).toBe(hash);
         expect(status.next).toContain(RAW_ORDER.houdiniId);
+        await t.close();
+        await signer.close();
+    });
+
+    // An agent unsure whether the first send went through asks again while the
+    // order is still waiting; that must not hand the user a second live form.
+    it("answers a second request for a signed order with the earlier hash", async () => {
+        const signer = new SigningServer();
+        const t = await driveTools(signer);
+        const req = await t.call("dexSignRequest", { houdiniId: RAW_ORDER.houdiniId });
+        const hash = `0x${"b".repeat(64)}`;
+        await fetch(req.url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Origin: new URL(req.url).origin },
+            body: JSON.stringify({ txHash: hash }),
+        });
+
+        const again = await t.call("dexSignRequest", { houdiniId: RAW_ORDER.houdiniId });
+        expect(again.alreadySent).toBe(true);
+        expect(again.txHash).toBe(hash);
+        expect(again.url).toBeUndefined();
+        expect(again.next).toContain("dexConfirmTx");
+        await t.close();
+        await signer.close();
+    });
+
+    it("reports the newer token as signed when the user sent from the older link", async () => {
+        const signer = new SigningServer();
+        const t = await driveTools(signer);
+        const old = await t.call("dexSignRequest", { houdiniId: RAW_ORDER.houdiniId });
+        const fresh = await t.call("dexSignRequest", { houdiniId: RAW_ORDER.houdiniId });
+        expect((await t.call("dexSignStatus", { token: old.token })).replacedBy).toBe(fresh.token);
+
+        const hash = `0x${"c".repeat(64)}`;
+        await fetch(old.url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Origin: new URL(old.url).origin },
+            body: JSON.stringify({ txHash: hash }),
+        });
+        const status = await t.call("dexSignStatus", { token: fresh.token });
+        expect(status.status).toBe("signed");
+        expect(status.txHash).toBe(hash);
         await t.close();
         await signer.close();
     });

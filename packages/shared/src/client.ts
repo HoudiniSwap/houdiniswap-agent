@@ -85,7 +85,13 @@ export class HoudiniClient {
         try {
             return await run(controller.signal);
         } catch (err) {
-            if (controller.signal.aborted) {
+            // Only the abort this timer caused. A paid retry outlives this bound
+            // (it has its own), so by the time it fails this signal has usually
+            // fired too; relabelling that as a plain timeout hid that the call
+            // may already be paid for. The same goes for any other error that
+            // merely surfaces late, such as a payment refused after a long wait
+            // in the payment queue.
+            if (controller.signal.aborted && (err as Error)?.name === "AbortError") {
                 throw new Error(`Request timed out after ${this.timeoutMs}ms`);
             }
             throw err;

@@ -113,7 +113,7 @@ vi.mock("@x402/core/client", () => ({
     },
 }));
 
-const { createX402Fetch, isSvmSecretKey } = await import("../src/x402.js");
+const { createX402Fetch, isSvmSecretKey, X402PaymentUnconfirmedError } = await import("../src/x402.js");
 const { registerExactSvmScheme } = await import("@x402/svm/exact/client");
 const { createKeyPairSignerFromBytes } = await import("@solana/kit");
 
@@ -218,6 +218,24 @@ describe("createX402Fetch", () => {
         expect(await second).toBe("status 200");
     });
 
+    it("says a payment may have been taken when the paid request fails", async () => {
+        mockFetch.mockImplementation(async (_url: string, init?: RequestInit) => {
+            const paid = Boolean((init?.headers as Record<string, string>)?.["x-payment"]);
+            if (!paid) return new Response("{}", { status: 402 });
+            throw new Error("socket hang up");
+        });
+
+        const f = createX402Fetch(`0x${"11".repeat(32)}`);
+        const err = await f("https://api.test/exchanges", { method: "POST" }).then(
+            () => undefined,
+            (e: Error) => e,
+        );
+        expect(err).toBeInstanceOf(X402PaymentUnconfirmedError);
+        expect(err?.message).toContain("socket hang up");
+        expect(err?.message).toMatch(/may have been taken/);
+        expect(err?.message).toMatch(/do not retry blindly/i);
+    });
+
     it("keeps serving later payments after one fails", async () => {
         vi.useFakeTimers();
         let call = 0;
@@ -234,7 +252,7 @@ describe("createX402Fetch", () => {
         const second = f("https://api.test/b");
         await vi.advanceTimersByTimeAsync(60_000);
 
-        expect(await first).toBe("settlement exploded");
+        expect(await first).toContain("settlement exploded");
         expect((await second).status).toBe(200);
     });
 });
