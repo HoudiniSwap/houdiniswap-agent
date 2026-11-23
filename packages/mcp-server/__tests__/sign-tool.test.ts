@@ -205,6 +205,73 @@ describe("swap composite on an unexpected envelope", () => {
     });
 });
 
+describe("swap composite and token security verdicts", () => {
+    const BTC = { id: "btc", symbol: "BTC", mainnet: true };
+    const ETH = { id: "eth", symbol: "ETH", mainnet: true };
+    const drive = async (opts: { quoteScans?: Record<string, unknown>; ethScan?: unknown }) => {
+        const posts: string[] = [];
+        const client = {
+            get: async (path: string, params: Record<string, unknown>) => {
+                if (path === "/tokens") {
+                    const tok = params.symbol === "BTC" ? BTC : { ...ETH, securityScan: opts.ethScan };
+                    return { total: 1, tokens: [tok] };
+                }
+                if (path === "/minMax") return {};
+                return {
+                    quotes: [{ quoteId: "q1", type: "standard", amountOut: 30, swapName: "X" }],
+                    ...opts.quoteScans,
+                };
+            },
+            post: async (path: string) => {
+                posts.push(path);
+                return { houdiniId: "h1", status: 0, depositAddress: "bc1qdeposit" };
+            },
+        } as unknown as HoudiniClient;
+        const server = new McpServer({ name: "t", version: "1" });
+        const { registerSwapFlowTool } = await import("../src/tools/swap-flow.js");
+        registerSwapFlowTool(server, client);
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        await server.connect(st);
+        const c = new Client({ name: "t", version: "1" }, { capabilities: {} });
+        await c.connect(ct);
+        const res = await c.callTool({
+            name: "swap",
+            arguments: { fromSymbol: "BTC", fromChain: "bitcoin", toSymbol: "ETH", toChain: "ethereum", amount: 1, addressTo: "0xabc" },
+        });
+        await c.close();
+        return { res, out: JSON.parse((res.content as Array<{ text: string }>)[0].text), posts };
+    };
+
+    it("refuses a token the quote flags as Malicious and creates no order", async () => {
+        const { res, out, posts } = await drive({ quoteScans: { toTokenScan: { resultType: "Malicious" } } });
+        expect(res.isError).toBe(true);
+        expect(out.error).toContain("ETH on ethereum");
+        expect(out.error).toContain("Malicious");
+        expect(posts).toEqual([]);
+    });
+
+    it("falls back to the token's stored verdict when the quote has none", async () => {
+        const { out, posts } = await drive({ ethScan: { resultType: "Malicious" } });
+        expect(out.error).toContain("Malicious");
+        expect(posts).toEqual([]);
+    });
+
+    it("lets the quote's fresh verdict override a stale stored one", async () => {
+        const { out, posts } = await drive({
+            ethScan: { resultType: "Malicious" },
+            quoteScans: { toTokenScan: { resultType: "Benign" } },
+        });
+        expect(out.success).toBe(true);
+        expect(posts).toEqual(["/exchanges"]);
+    });
+
+    it("still swaps a Warning token (only Malicious is refused)", async () => {
+        const { out, posts } = await drive({ quoteScans: { fromTokenScan: { resultType: "Warning" } } });
+        expect(out.success).toBe(true);
+        expect(posts).toEqual(["/exchanges"]);
+    });
+});
+
 describe("dexSignStatus", () => {
     // Had no test at all. Reducing the response to { status } drops txHash, so
     // the agent can never call dexConfirmTx: the swap is signed, paid for, and
