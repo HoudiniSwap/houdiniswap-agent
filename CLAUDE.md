@@ -82,3 +82,7 @@ This paragraph previously claimed the tools take `address` and `quoteId` while S
 ## Releasing
 
 All three packages publish to npm under `@houdiniswap` (`shared` included — it's a runtime dependency of the other two), in order shared → mcp-server → ai-tools. Separately, **this repo is also a Claude Code plugin marketplace**: `.claude-plugin/marketplace.json` lists the `houdiniswap` plugin under `plugins/houdiniswap/`, whose `plugin.json` bundles the skill plus an MCP server entry (`npx -y @houdiniswap/mcp-server`). Users install with `/plugin marketplace add HoudiniSwap/houdiniswap-agent` then `/plugin install houdiniswap@houdiniswap`. Versioning, npm publish, and plugin validate/install steps are all in `PUBLISHING.md`.
+
+## Security
+
+Changes to signing, x402 payments, the HTTP transport, the `swap` flow, the plugin or the publish workflow need a security review before merge: see [docs/security-review.md](docs/security-review.md). Vulnerability reports go through [SECURITY.md](SECURITY.md). The Security Scan workflow (Gitleaks, Semgrep, actionlint, zizmor, npm audit) runs on every PR; reviewed Gitleaks exceptions go in `.gitleaks.toml`.
