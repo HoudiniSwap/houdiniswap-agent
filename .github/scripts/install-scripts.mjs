@@ -65,9 +65,12 @@ const allowed = new Set(
         : [],
 );
 
-const baseIds = new Set(base.map((e) => `${e.resolved}|${e.integrity}`));
+// Only entries with a verified registry identity count as unchanged; anything
+// without one always goes to the lookup below, which fails it.
+const key = (e) => `${e.name}@${e.version}|${e.resolved}|${e.integrity}`;
+const baseIds = new Set(base.filter((e) => e.name && e.integrity).map(key));
 const baseWithScripts = new Set(base.filter((e) => e.flagged && e.name).map((e) => e.name));
-const changed = head.filter((e) => !baseIds.has(`${e.resolved}|${e.integrity}`));
+const changed = head.filter((e) => !(e.name && e.integrity && baseIds.has(key(e))));
 
 const errors = [];
 const hasScript = async (e) => {
