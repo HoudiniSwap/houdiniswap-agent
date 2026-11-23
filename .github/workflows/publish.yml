@@ -183,18 +183,20 @@ jobs:
           # The registry's read path lags its write path. Checking immediately
           # after publishing agent-shared reported the version as missing 0.35s
           # after npm confirmed it published, which failed a correct release.
-          # Retry before concluding the range is genuinely unsatisfiable.
+          # Retry before concluding the range is genuinely unsatisfiable. The lag
+          # is not always short: one release needed ~90s, which outlasted a 50s
+          # wait. Allow ~3 minutes (18 tries, 10s apart).
           assert_shared_range_resolvable() {
-            local dir="$1" range attempt
+            local dir="$1" range attempt attempts=18
             range=$(node -p "require('./$dir/package.json').dependencies['@houdiniswap/agent-shared'] || ''")
             [ -n "$range" ] || return 0
 
-            for attempt in 1 2 3 4 5 6; do
-              if npm view "@houdiniswap/agent-shared@$range" version >/dev/null 2>&1; then
+            for attempt in $(seq 1 "$attempts"); do
+              if npm view "@houdiniswap/agent-shared@$range" version --prefer-online >/dev/null 2>&1; then
                 echo "· $dir's agent-shared@$range resolves (attempt $attempt)"
                 return 0
               fi
-              [ "$attempt" -lt 6 ] && sleep 10
+              [ "$attempt" -lt "$attempts" ] && sleep 10
             done
 
             if true; then
