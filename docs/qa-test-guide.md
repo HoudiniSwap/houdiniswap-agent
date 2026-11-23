@@ -19,12 +19,6 @@ Every case here has now been run end to end against mainnet with real funds,
 including the CEX, private and Permit2 paths. Where a case has a **Known good**
 line, that is a measured result, not an expectation.
 
-> **Open backend issue — do not be surprised by it.** Under x402 every payer is
-> authenticated as the same partner, so `getOrders` and `getOrder` return **other
-> people's orders**, private ones included. Reported separately; it is a backend
-> scoping fix, not something this package can correct. Do not file it again, and do
-> not treat a stranger's order in your list as a client bug.
-
 ---
 
 ## Quick install
@@ -517,7 +511,6 @@ takes roughly 15 seconds and can read as a hang. That is expected.
   delivered 0.002929389 in one measured case. CEX and private orders *do* reconcile
   exactly, so the mismatch is DEX-only. Backend ticket; check the chain, not the
   field.
-- **Other people's orders in `getOrders`.** See the note at the top of this guide.
 - **A DEX revert one to two minutes after ordering.** Expected; see the box above
   T9. Only file it if it happens when you sign *promptly*.
 
