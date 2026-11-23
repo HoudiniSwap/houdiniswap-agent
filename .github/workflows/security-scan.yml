@@ -242,9 +242,12 @@ jobs:
   package-contents:
     name: Package contents
     runs-on: ubuntu-latest
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
@@ -280,6 +283,13 @@ jobs:
             tar -xzf "${tgz}" -C "${out}/unpacked/$(basename "${tgz}" .tgz)"
           done
           "${RUNNER_TEMP}/gitleaks" dir --no-banner --redact --config .gitleaks.toml --exit-code 1 "${out}/unpacked"
+          # Again with the base branch's config, so a PR cannot widen the
+          # allowlist to pass its own check.
+          if [ -n "${BASE_SHA}" ] && git cat-file -e "${BASE_SHA}:.gitleaks.toml" 2>/dev/null; then
+            git show "${BASE_SHA}:.gitleaks.toml" > "${RUNNER_TEMP}/base-gitleaks.toml"
+            "${RUNNER_TEMP}/gitleaks" dir --no-banner --redact --config "${RUNNER_TEMP}/base-gitleaks.toml" \
+              --exit-code 1 "${out}/unpacked"
+          fi
 
   dependency-audit:
     name: Dependency audit
