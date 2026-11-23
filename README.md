@@ -144,6 +144,8 @@ The x402 protocol enables pay-per-request API access with USDC on Base or Solana
 | `HOUDINI_X402_PRIVATE_KEY` | One of these | — | EVM wallet private key for x402 payments in USDC on Base |
 | `HOUDINI_X402_SVM_PRIVATE_KEY` | One of these | — | Solana secret key (base58) for x402 payments in USDC on Solana |
 | `HOUDINI_X402_NETWORK` | No | `base` | With both x402 keys, the network paid on first: `base` or `solana`. A payment refused there (an empty wallet, for example) is retried on the other |
+| `HOUDINI_X402_PAY_TO_BASE` / `HOUDINI_X402_PAY_TO_SOLANA` | No | HoudiniSwap's production addresses | Comma-separated recipients the x402 client pays on that network; any other recipient is refused. Set them only when pointing `HOUDINI_API_URL` at another HoudiniSwap environment |
+| `HOUDINI_X402_BUDGET_USDC` | No | `10` | Most the server signs in x402 payments while it runs, in USDC (shared by every caller in HTTP mode; a restart resets it). A payment past it fails with an error saying so. Every signed payment counts: with an empty Base wallet and a funded Solana one, each call signs twice |
 | `HOUDINI_API_KEY` | One of these | — | Partner API key (`id:secret`) |
 | `HOUDINI_PARTNER_ID` | One of these | — | Public partner ID (read-only access) |
 | `HOUDINI_API_URL` | No | `https://api-partner.houdiniswap.com/v2` | API base URL |

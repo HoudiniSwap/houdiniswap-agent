@@ -32,11 +32,36 @@ const TOKEN_KEYS = [
     // unverified token, which it cannot do if this is stripped. Absent on
     // verified tokens, so it costs nothing on the common path.
     "unverified",
+    // Admin-set text the site shows before a swap of this token. Same topic as
+    // `unverified`; absent on almost every token.
+    "warningMessage",
     "hasCex",
     "hasDex",
     "hasSelfPrivate",
     "price",
 ] as const;
+
+/**
+ * A token's security verdict, cut to what the skill branches on: `resultType`
+ * (Benign | Warning | Malicious | Unscanned), the ids of the findings, which
+ * are short enough to show the user, and `expiresAt` — a token list returns
+ * stored verdicts without re-screening them, and a past `expiresAt` is the only
+ * sign that one is stale. Provider name and scores go.
+ */
+export const compactScan = (scan: unknown): unknown => {
+    if (!scan || typeof scan !== "object") return undefined;
+    const source = scan as Json;
+    if (typeof source.resultType !== "string") return undefined;
+    const out: Json = { resultType: source.resultType };
+    if (Array.isArray(source.features)) {
+        const featureIds = source.features
+            .map((f) => (f && typeof f === "object" ? (f as Json).featureId : undefined))
+            .filter((id): id is string => typeof id === "string");
+        if (featureIds.length) out.featureIds = featureIds;
+    }
+    if (typeof source.expiresAt === "string" && source.expiresAt) out.expiresAt = source.expiresAt;
+    return out;
+};
 
 /** Drops `description`, `icon`, `chainData` and market-cap noise; keeps `chainId`. */
 export const compactToken = (token: unknown): unknown => {
@@ -51,6 +76,10 @@ export const compactToken = (token: unknown): unknown => {
     // agent has to spend a separate getChains call to render the format it is
     // told to use.
     if (typeof chainData?.name === "string") out.chainName = chainData.name;
+    // Safety-critical, like `unverified`: the skill refuses a Malicious token
+    // and warns on a Warning one, which it cannot do if this is stripped.
+    const scan = compactScan(source.securityScan);
+    if (scan) out.securityScan = scan;
     return out;
 };
 
@@ -199,6 +228,8 @@ export const compactQuoteResult = (
         kept.push(compactQuote(quote));
     }
 
+    const fromTokenScan = compactScan(source.fromTokenScan);
+    const toTokenScan = compactScan(source.toTokenScan);
     return {
         total: source.total ?? rawQuotes.length,
         returned: kept.length,
@@ -211,6 +242,9 @@ export const compactQuoteResult = (
                   note: "The API ignored the `swaps` filter (it does so for DEX quotes); it was applied here instead.",
               }
             : {}),
+        // Verdicts for the two tokens, screened while the quote ran.
+        ...(fromTokenScan ? { fromTokenScan } : {}),
+        ...(toTokenScan ? { toTokenScan } : {}),
         quotes: kept,
     };
 };

@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { HoudiniClient, HoudiniApiError } from "../src/client.js";
-import { createX402Fetch } from "../src/x402.js";
+import { createX402Fetch, X402PaymentUnconfirmedError } from "../src/x402.js";
 
 // Mock the x402 module to avoid importing real crypto libs in unit tests
 vi.mock("../src/x402.js", () => ({
     createX402Fetch: vi.fn(() => vi.fn()),
+    X402PaymentUnconfirmedError: class X402PaymentUnconfirmedError extends Error {},
 }));
 
 const mockFetch = vi.fn();
@@ -407,12 +408,50 @@ describe("request timeout", () => {
         vi.useFakeTimers();
         mockFetch.mockImplementation((_u: string, init?: RequestInit) =>
             new Promise((_res, rej) => {
-                init?.signal?.addEventListener("abort", () => rej(new Error("aborted")));
+                // What fetch throws when its signal fires.
+                init?.signal?.addEventListener("abort", () => rej(new DOMException("aborted", "AbortError")));
             }));
         const client = new HoudiniClient({ auth: { type: "none" }, timeoutMs: 5_000 });
         const p = client.get("/tokens").then(() => "resolved", (e: Error) => e.message);
         await vi.advanceTimersByTimeAsync(10_000);
         expect(await p).toMatch(/timed out after 5000ms/);
+        vi.useRealTimers();
+    });
+
+    // The paid retry has its own, longer bound, so when it fails this timeout
+    // has usually fired too. Reporting that as a plain timeout told the agent
+    // nothing had happened, and its retry paid and created a second order.
+    it("does not relabel a paid request that failed after payment as a timeout", async () => {
+        vi.useFakeTimers();
+        const paidFetch = vi.fn(
+            () =>
+                new Promise((_res, rej) => {
+                    setTimeout(() => rej(new X402PaymentUnconfirmedError("payment may have been taken")), 60_000);
+                }),
+        );
+        vi.mocked(createX402Fetch).mockReturnValueOnce(paidFetch as unknown as typeof fetch);
+        const client = new HoudiniClient({ auth: { type: "x402", privateKey: `0x${"11".repeat(32)}` }, timeoutMs: 5_000 });
+        const p = client.post("/exchanges", {}).then(() => "resolved", (e: Error) => e.message);
+        await vi.advanceTimersByTimeAsync(61_000);
+        expect(await p).toBe("payment may have been taken");
+        vi.useRealTimers();
+    });
+
+    // Only the timer's own abort is a timeout. A payment refused after a long
+    // wait in the payment queue (a spending limit, say) surfaces after this
+    // bound too, and calling it "timed out" sent the agent to retry.
+    it("does not relabel a late error that is not an abort", async () => {
+        vi.useFakeTimers();
+        mockFetch.mockImplementation(
+            () =>
+                new Promise((_res, rej) => {
+                    setTimeout(() => rej(new Error("x402: spending limit reached")), 10_000);
+                }),
+        );
+        const client = new HoudiniClient({ auth: { type: "none" }, timeoutMs: 5_000 });
+        const p = client.get("/tokens").then(() => "resolved", (e: Error) => e.message);
+        await vi.advanceTimersByTimeAsync(11_000);
+        expect(await p).toBe("x402: spending limit reached");
         vi.useRealTimers();
     });
 

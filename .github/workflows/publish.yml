@@ -27,39 +27,30 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  # Everything that runs third-party code — the dependency install, the
+  # compiler, the tests — runs here, without the OIDC token that can publish.
+  build:
     # `on: push` is already restricted to main, but workflow_dispatch runs
     # against whatever ref is selected — without this, dispatching from a branch
     # publishes that branch's code as `latest`.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
-      id-token: write # required for OIDC trusted publishing
       contents: read
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          # Trusted publishing requires Node >= 22.14.0 and npm >= 11.5.1.
           node-version: 22
-          registry-url: https://registry.npmjs.org
           cache: npm
 
-      - name: Upgrade npm to a version that supports trusted publishing
-        # Pinned to a major: trusted publishing needs >= 11.5.1, and a future npm
-        # major should not land in the release path unannounced.
-        run: npm install -g npm@^11
-
       - name: Install dependencies
-        # --ignore-scripts because this job holds `id-token: write`, and the OIDC
-        # request URL and token sit in the environment of every process it
-        # spawns. A postinstall anywhere in the dependency tree could therefore
-        # mint an npm token and publish — no commit, no review, no maintainer
-        # account involved. Nothing in the tree needs an install script; CI runs
-        # the same flags, so a dependency that starts needing one fails there
-        # first rather than here.
+        # Same flags as CI, so a dependency that starts needing an install
+        # script fails there first rather than here.
         run: npm ci --ignore-scripts
 
       - name: Build
@@ -67,6 +58,47 @@ jobs:
 
       - name: Test
         run: npm run test
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: |
+            packages/shared/dist
+            packages/mcp-server/dist
+            packages/ai-tools/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  # Holds `id-token: write`. The OIDC request URL and token sit in the
+  # environment of every process this job spawns, so it installs nothing from
+  # the project and runs no package scripts: it publishes the build job's
+  # output with a pinned npm.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # required for OIDC trusted publishing
+      contents: read
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          # Trusted publishing requires Node >= 22.14.0 and npm >= 11.5.1.
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Install a pinned npm that supports trusted publishing
+        # An exact version: whatever runs here can publish.
+        run: npm install -g --ignore-scripts npm@11.21.1
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: packages
 
       # Order matters: mcp-server and ai-tools depend on agent-shared, so it has
       # to reach the registry first or a consumer installing in the gap gets a
@@ -129,7 +161,12 @@ jobs:
               exit 1
             else
               echo "→ publishing $name@$local_version (registry has ${remote_version:-nothing})"
-              npm publish
+              # --ignore-scripts: prepublishOnly would rebuild, and dist/
+              # already holds the build that was tested.
+              # --ignore-scripts also means nothing rebuilds a missing dist/, and a
+              # version published without its build can never be published again.
+              [ -f dist/index.js ] || { echo "✗ $name: no dist/index.js, refusing to publish" >&2; exit 1; }
+              npm publish --ignore-scripts
               echo "  published $name@$local_version"
             fi
 

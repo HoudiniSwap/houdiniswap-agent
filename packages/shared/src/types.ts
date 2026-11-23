@@ -5,6 +5,13 @@ export interface HoudiniConfig {
     timeoutMs?: number;
     /** x402 only: called after each paid request that succeeded, with what was paid and from where. */
     onPayment?: (payment: X402Payment) => void;
+    /** x402 only: who may be paid and how much in total. See `X402Options`. */
+    x402?: {
+        /** Recipients per network, replacing the production defaults for the networks given. */
+        payTo?: Partial<Record<X402Network, readonly string[]>>;
+        /** Total this client may sign, in USDC atomic units. Defaults to $10. */
+        budgetAtomic?: bigint;
+    };
 }
 
 /** One x402 payment, as the API's receipt reports it. */
