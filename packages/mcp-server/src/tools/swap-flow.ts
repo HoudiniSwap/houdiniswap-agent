@@ -13,12 +13,16 @@ const pickToken = (tokens?: Token[]): Token | undefined =>
 
 type Scan = { resultType?: unknown };
 
-// The quote's verdict is the freshest; the token list returns stored ones
-// without re-screening, so it is only the fallback.
-const isMalicious = (quoteScan: unknown, token: Token): boolean => {
-    const scan = (quoteScan ?? (token as Token & { securityScan?: unknown }).securityScan) as Scan | undefined;
-    return scan?.resultType === "Malicious";
+const saysMalicious = (scan: unknown): boolean => {
+    const resultType = (scan as Scan | undefined)?.resultType;
+    return typeof resultType === "string" && resultType.toLowerCase() === "malicious";
 };
+
+// Either source is enough. The quote's verdict can be a temporary "Unscanned"
+// (the screen timed out), which must not hide a "Malicious" verdict already
+// stored on the token.
+const isMalicious = (quoteScan: unknown, token: Token): boolean =>
+    saysMalicious(quoteScan) || saysMalicious((token as Token & { securityScan?: unknown }).securityScan);
 
 export const registerSwapFlowTool = (server: McpServer, client: HoudiniClient) => {
     server.tool(

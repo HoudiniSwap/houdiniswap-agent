@@ -256,13 +256,21 @@ describe("swap composite and token security verdicts", () => {
         expect(posts).toEqual([]);
     });
 
-    it("lets the quote's fresh verdict override a stale stored one", async () => {
-        const { out, posts } = await drive({
-            ethScan: { resultType: "Malicious" },
-            quoteScans: { toTokenScan: { resultType: "Benign" } },
-        });
-        expect(out.success).toBe(true);
-        expect(posts).toEqual(["/exchanges"]);
+    it("refuses when the stored verdict is Malicious, whatever the quote says", async () => {
+        for (const resultType of ["Unscanned", "Benign"]) {
+            const { out, posts } = await drive({
+                ethScan: { resultType: "Malicious" },
+                quoteScans: { toTokenScan: { resultType } },
+            });
+            expect(out.error).toContain("ETH on ethereum");
+            expect(posts).toEqual([]);
+        }
+    });
+
+    it("matches the Malicious verdict case-insensitively", async () => {
+        const { out, posts } = await drive({ quoteScans: { fromTokenScan: { resultType: "MALICIOUS" } } });
+        expect(out.error).toContain("BTC on bitcoin");
+        expect(posts).toEqual([]);
     });
 
     it("still swaps a Warning token (only Malicious is refused)", async () => {
