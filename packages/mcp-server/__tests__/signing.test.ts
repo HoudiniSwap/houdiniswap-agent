@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { SigningServer } from "../src/signing/server.js";
 import { Script } from "node:vm";
 import { connect } from "node:net";
-import { summarise, renderSignPage } from "../src/signing/page.js";
+import { summarise, renderSignPage, renderSignedPage } from "../src/signing/page.js";
 
 /**
  * The signer holds no key and no funds, but it decides what a user is asked to
@@ -196,6 +196,113 @@ describe("signing server", () => {
         const { url, token } = await s.request("H1", TX, 8453, Date.now() - 1);
         expect(s.status(token)?.status).toBe("expired");
         expect((await fetch(url)).status).toBe(404);
+    });
+
+    // The form is single-use. Before this, a reload or a second tab after the
+    // user signed served the live form again and could broadcast the transfer a
+    // second time; the second report was refused, but the transaction was sent.
+    it("serves an already-signed notice, not the form, once signed", async () => {
+        const s = make();
+        const { url } = await s.request("H1", TX, 8453, later());
+        await post(url, { txHash: HASH });
+        const res = await fetch(url);
+        expect(res.status).toBe(200);
+        const html = await res.text();
+        expect(html).toContain("already been sent");
+        expect(html).toContain(`https://basescan.org/tx/${HASH}`);
+        expect(html).not.toContain("<script");
+        expect(html).not.toContain("eth_sendTransaction");
+        expect(html).not.toContain('id="go"');
+    });
+
+    it("keeps serving the signed notice after expiry, within the grace", async () => {
+        const s = make();
+        const { url } = await s.request("H1", TX, 8453, Date.now() + 50);
+        await post(url, { txHash: HASH });
+        await new Promise((r) => setTimeout(r, 80));
+        const res = await fetch(url);
+        expect(res.status).toBe(200);
+        expect(await res.text()).toContain(HASH);
+    });
+
+    it("serves the signed notice for a signature that arrived after expiry", async () => {
+        const s = make();
+        const { url } = await s.request("H1", TX, 8453, Date.now() - 1000);
+        await post(url, { txHash: HASH });
+        expect(await (await fetch(url)).text()).toContain("already been sent");
+    });
+
+    it("still serves the form after a rejection", async () => {
+        const s = make();
+        const { url } = await s.request("H1", TX, 8453, later());
+        await post(url, { error: "user rejected" });
+        const res = await fetch(url);
+        expect(res.status).toBe(200);
+        expect(await res.text()).toContain('id="go"');
+    });
+
+    // The form stays live after a rejection, so a retry can succeed. Refusing
+    // its report lost the hash of a transaction already on chain, and the agent
+    // went on believing nothing was sent.
+    it("records a hash sent on a retry after a rejection", async () => {
+        const s = make();
+        const { url, token } = await s.request("H1", TX, 8453, later());
+        await post(url, { error: "gas estimation failed: reverted" });
+        expect(s.status(token)?.status).toBe("rejected");
+        expect((await post(url, { txHash: HASH })).status).toBe(200);
+        expect(s.status(token)?.status).toBe("signed");
+        expect(s.status(token)?.txHash).toBe(HASH);
+        expect(s.status(token)?.error).toBeUndefined();
+        expect((await post(url, { error: "late" })).status).toBe(409);
+    });
+
+    // Single use per order, not per link. The order stays at "waiting" until the
+    // backend sees the transaction, which is exactly when an agent asks again;
+    // a fresh form then was a second transfer.
+    it("hands back the recorded hash instead of a new link for a signed order", async () => {
+        const s = make();
+        const first = await s.request("H1", TX, 8453, later());
+        await post(first.url, { txHash: HASH });
+        const again = await s.request("H1", TX, 8453, later());
+        expect(again.alreadySigned).toBe(true);
+        expect(again.token).toBe(first.token);
+        expect(again.txHash).toBe(HASH);
+        expect(first.alreadySigned).toBe(false);
+    });
+
+    it("retires the older link when a new one is issued for the same order", async () => {
+        const s = make();
+        const old = await s.request("H1", TX, 8453, later());
+        await post(old.url, { error: "user rejected" });
+        const fresh = await s.request("H1", TX, 8453, later());
+        expect(fresh.token).not.toBe(old.token);
+
+        const html = await (await fetch(old.url)).text();
+        expect(html).toContain("Link replaced");
+        expect(html).not.toContain("<script");
+        expect(html).not.toContain('id="go"');
+        expect(await (await fetch(fresh.url)).text()).toContain('id="go"');
+        expect(s.status(old.token)?.replacedBy).toBe(fresh.token);
+    });
+
+    // The old tab may already hold the form, and a send from it is on chain.
+    it("still records a hash from a replaced link and stops serving the newer form", async () => {
+        const s = make();
+        const old = await s.request("H1", TX, 8453, later());
+        const fresh = await s.request("H1", TX, 8453, later());
+        expect((await post(old.url, { txHash: HASH })).status).toBe(200);
+        expect(s.signedFor("H1")?.token).toBe(old.token);
+
+        const html = await (await fetch(fresh.url)).text();
+        expect(html).toContain("already been sent");
+        expect(html).toContain(HASH);
+        expect(html).not.toContain('id="go"');
+    });
+
+    it("renders the signed notice without a link on an unknown chain", () => {
+        const html = renderSignedPage("H1", 999, HASH);
+        expect(html).toContain(HASH);
+        expect(html).not.toContain("<a ");
     });
 
     it("keeps separate requests independent", async () => {
