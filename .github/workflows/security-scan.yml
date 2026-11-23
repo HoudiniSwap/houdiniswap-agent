@@ -282,13 +282,16 @@ jobs:
             mkdir -p "${out}/unpacked/$(basename "${tgz}" .tgz)"
             tar -xzf "${tgz}" -C "${out}/unpacked/$(basename "${tgz}" .tgz)"
           done
-          "${RUNNER_TEMP}/gitleaks" dir --no-banner --redact --config .gitleaks.toml --exit-code 1 "${out}/unpacked"
+          # Same rules as the commit scan: no inline or file-based allows.
+          find . "${out}/unpacked" -name .gitleaksignore -not -path './.git/*' -delete
+          "${RUNNER_TEMP}/gitleaks" dir --no-banner --redact --config .gitleaks.toml --ignore-gitleaks-allow \
+            --exit-code 1 "${out}/unpacked"
           # Again with the base branch's config, so a PR cannot widen the
           # allowlist to pass its own check.
           if [ -n "${BASE_SHA}" ] && git cat-file -e "${BASE_SHA}:.gitleaks.toml" 2>/dev/null; then
             git show "${BASE_SHA}:.gitleaks.toml" > "${RUNNER_TEMP}/base-gitleaks.toml"
             "${RUNNER_TEMP}/gitleaks" dir --no-banner --redact --config "${RUNNER_TEMP}/base-gitleaks.toml" \
-              --exit-code 1 "${out}/unpacked"
+              --ignore-gitleaks-allow --exit-code 1 "${out}/unpacked"
           fi
 
   dependency-audit:

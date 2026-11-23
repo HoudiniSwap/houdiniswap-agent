@@ -9,7 +9,8 @@
 // looked up on the npm registry (install/preinstall/postinstall scripts, or a
 // binding.gyp that npm builds on install). A lookup that fails, a lockfile
 // that does not parse, or a dependency from outside the registry fails the
-// check.
+// check. So does a lockfile entry whose name, version or integrity does not
+// match the registry tarball it points to.
 // Usage: node install-scripts.mjs <base lockfile> <head lockfile> [allowlist]
 import { existsSync, readFileSync } from "node:fs";
 
@@ -28,14 +29,31 @@ const load = (file, required) => {
     }
 };
 
-// Real package identity: `name` is set for aliased installs (npm:pkg@x).
+// Identity comes from the tarball URL npm will download, not from the lockfile
+// key or its `name` field: https://registry.npmjs.org/<name>/-/<base>-<version>.tgz
+const TARBALL = /^\/((?:@[a-z0-9][a-z0-9._~-]*\/)?([a-z0-9][a-z0-9._~-]*))\/-\/([a-z0-9][a-z0-9._~-]*)-(\d+\.\d+\.\d+(?:-[0-9a-z.-]+)?(?:\+[0-9a-z.-]+)?)\.tgz$/i;
+const fromRegistry = (resolved, version) => {
+    let url;
+    try {
+        url = new URL(resolved);
+    } catch {
+        return null;
+    }
+    if (url.protocol !== "https:" || url.host !== "registry.npmjs.org" || url.search || url.hash) return null;
+    const m = TARBALL.exec(url.pathname);
+    if (!m || m[3] !== m[2] || m[4] !== version || m[1].includes("..")) return null;
+    return m[1];
+};
+
 const entries = (packages) =>
     Object.entries(packages)
         .filter(([path, p]) => path.includes("node_modules/") && !p.link)
         .map(([path, p]) => ({
-            name: p.name ?? path.slice(path.lastIndexOf("node_modules/") + "node_modules/".length),
+            path,
+            name: fromRegistry(p.resolved ?? "", p.version),
             version: p.version,
             resolved: p.resolved,
+            integrity: p.integrity,
             flagged: Boolean(p.hasInstallScript),
         }));
 
@@ -47,14 +65,18 @@ const allowed = new Set(
         : [],
 );
 
-const baseIds = new Set(base.map((e) => `${e.name}@${e.version}|${e.resolved}`));
-const baseWithScripts = new Set(base.filter((e) => e.flagged).map((e) => e.name));
-const changed = head.filter((e) => !baseIds.has(`${e.name}@${e.version}|${e.resolved}`));
+const baseIds = new Set(base.map((e) => `${e.resolved}|${e.integrity}`));
+const baseWithScripts = new Set(base.filter((e) => e.flagged && e.name).map((e) => e.name));
+const changed = head.filter((e) => !baseIds.has(`${e.resolved}|${e.integrity}`));
 
 const errors = [];
 const hasScript = async (e) => {
-    if (!e.resolved || !e.resolved.startsWith(REGISTRY)) {
-        errors.push(`${e.name}@${e.version} does not come from the npm registry (${e.resolved ?? "no resolved URL"})`);
+    if (!e.name) {
+        errors.push(`${e.path} does not resolve to an npm registry tarball for its version (${e.resolved ?? "no resolved URL"})`);
+        return e.flagged;
+    }
+    if (!e.integrity) {
+        errors.push(`${e.name}@${e.version} has no integrity hash in the lockfile`);
         return e.flagged;
     }
     const url = `${REGISTRY}${e.name.replace("/", "%2F")}/${encodeURIComponent(e.version)}`;
@@ -63,6 +85,10 @@ const hasScript = async (e) => {
             const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const doc = await res.json();
+            if (doc.dist?.integrity !== e.integrity) {
+                errors.push(`${e.name}@${e.version}: lockfile integrity does not match the registry`);
+                return true;
+            }
             const scripts = doc.scripts ?? {};
             return e.flagged || Boolean(scripts.preinstall || scripts.install || scripts.postinstall || doc.gypfile);
         } catch (err) {
