@@ -7,6 +7,9 @@ name: Security Scan
 #
 # Blocking:
 #   - Gitleaks on the commits the PR adds
+#   - Dependency review: new runtime dependencies with high/critical advisories
+#   - Install scripts: any new dependency that runs one
+#   - Package contents: what npm would publish (dist/ only, no secrets)
 #   - Semgrep ERROR findings the PR adds (registry packs, baseline = PR base)
 #   - actionlint on workflow files the PR changes
 # Report-only (job summary):
@@ -197,6 +200,86 @@ jobs:
           if [ "${rc}" -ne 0 ] && { [ "${rc}" -lt 10 ] || [ "${rc}" -gt 14 ]; }; then
             echo "::warning::zizmor failed with exit ${rc}; see the job summary"
           fi
+
+  # New dependencies run on users' machines next to their wallet keys.
+  # Blocking on PRs: a new runtime dependency with a known high or critical
+  # vulnerability, or any new dependency that runs an install script.
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
+        with:
+          fail-on-severity: high
+          fail-on-scopes: runtime
+
+  install-scripts:
+    name: Install scripts
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22.x"
+
+      - name: No new dependency with an install script
+        run: |
+          set -euo pipefail
+          git show "${BASE_SHA}:package-lock.json" > "${RUNNER_TEMP}/base-lock.json" 2>/dev/null || echo '{}' > "${RUNNER_TEMP}/base-lock.json"
+          git show "${BASE_SHA}:.github/allowed-install-scripts.txt" > "${RUNNER_TEMP}/allowed.txt" 2>/dev/null || : > "${RUNNER_TEMP}/allowed.txt"
+          node .github/scripts/install-scripts.mjs "${RUNNER_TEMP}/base-lock.json" package-lock.json "${RUNNER_TEMP}/allowed.txt"
+
+  # What `npm publish` would ship: only package.json, README, LICENSE and
+  # dist/, no tests or env files, and no secrets in the built code.
+  package-contents:
+    name: Package contents
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22.x"
+
+      - name: Build
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx turbo run build
+
+      - name: Install Gitleaks
+        run: |
+          set -euo pipefail
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL -o "${RUNNER_TEMP}/${tarball}" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
+          echo "${GITLEAKS_SHA256}  ${RUNNER_TEMP}/${tarball}" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/${tarball}" -C "${RUNNER_TEMP}" gitleaks
+
+      - name: Check the packed files
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/packs"
+          mkdir -p "${out}/unpacked"
+          for pkg in packages/*/; do
+            (cd "${pkg}" && npm pack --ignore-scripts --json --pack-destination "${out}") > "${out}/$(basename "${pkg}").json"
+          done
+          node -e 'const fs=require("fs");const d=process.argv[1];const all=fs.readdirSync(d).filter(f=>f.endsWith(".json")).flatMap(f=>JSON.parse(fs.readFileSync(d+"/"+f,"utf8")));fs.writeFileSync(d+"/all.json",JSON.stringify(all));' "${out}"
+          node .github/scripts/pack-check.mjs "${out}/all.json"
+          for tgz in "${out}"/*.tgz; do
+            mkdir -p "${out}/unpacked/$(basename "${tgz}" .tgz)"
+            tar -xzf "${tgz}" -C "${out}/unpacked/$(basename "${tgz}" .tgz)"
+          done
+          "${RUNNER_TEMP}/gitleaks" dir --no-banner --redact --config .gitleaks.toml --exit-code 1 "${out}/unpacked"
 
   dependency-audit:
     name: Dependency audit
