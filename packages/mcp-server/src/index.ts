@@ -6,6 +6,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { getAuthConfig, getX402Policy } from "./auth.js";
 import { recordPayment } from "./payments.js";
 import { allowedHostnames, hostCheck } from "./host-check.js";
+import { jsonBodyErrors } from "./body-errors.js";
 
 const main = async () => {
     const baseUrl = process.env.HOUDINI_API_URL;
@@ -107,6 +108,8 @@ const main = async () => {
                 }
             }
         });
+
+        app.use(jsonBodyErrors);
 
         // Loopback by default. This server spends a funded wallet — every tool
         // call costs USDC and createExchange costs $0.01 — and it has no
