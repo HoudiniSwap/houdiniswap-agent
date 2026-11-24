@@ -1,0 +1,3 @@
+# Dependencies allowed to run an install script (HS-2658). The Security Scan
+# workflow reads this file from the base branch, so add an entry in its own
+# reviewed PR. One package name per line.

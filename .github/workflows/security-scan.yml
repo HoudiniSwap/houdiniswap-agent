@@ -1,0 +1,314 @@
+name: Security Scan
+
+# Static security checks for pull requests into main (HS-2658). A lighter copy
+# of houdiniswap-backend's security-scan.yml. GitHub-hosted runners only: this
+# repository is public, so pull requests from forks must never reach a
+# self-hosted runner.
+#
+# Blocking:
+#   - Gitleaks on the commits the PR adds
+#   - Dependency review: new runtime dependencies with high/critical advisories
+#   - Install scripts: any new dependency that runs one
+#   - Package contents: what npm would publish (dist/ only, no secrets)
+#   - Semgrep ERROR findings the PR adds (registry packs, baseline = PR base)
+#   - actionlint on workflow files the PR changes
+# Report-only (job summary):
+#   - Semgrep WARNING findings the PR adds
+#   - zizmor (GitHub Actions security audit) on all workflows
+#   - npm audit of production dependencies
+#
+# Run the same tools locally: see docs/security-review.md.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Python tools install from hashed requirements in .github/requirements/;
+# binaries are checked against their published SHA-256 sums.
+env:
+  GITLEAKS_VERSION: "8.30.1"
+  GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+  ACTIONLINT_VERSION: "1.7.12"
+  ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+
+jobs:
+  gitleaks:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Gitleaks
+        run: |
+          set -euo pipefail
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL -o "${RUNNER_TEMP}/${tarball}" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
+          echo "${GITLEAKS_SHA256}  ${RUNNER_TEMP}/${tarball}" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/${tarball}" -C "${RUNNER_TEMP}" gitleaks
+
+      # Only the commits the PR adds, so old history does not block unrelated
+      # work; -m includes what merge commits change. Inline `gitleaks:allow` comments and .gitleaksignore files are
+      # ignored, so a PR cannot allow its own leak; reviewed exceptions go in
+      # .gitleaks.toml. The scan runs a second time with the base branch's
+      # config, so a PR cannot widen the allowlist to pass its own check.
+      - name: Scan new commits
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "${PR_BASE}" ]; then
+            range="${PR_BASE}..${PR_HEAD}"
+          else
+            range="${GITHUB_SHA}~1..${GITHUB_SHA}"
+          fi
+          find . -name .gitleaksignore -not -path './.git/*' -delete
+          echo "Scanning ${range}"
+          "${RUNNER_TEMP}/gitleaks" git --no-banner --redact --config .gitleaks.toml \
+            --ignore-gitleaks-allow --log-opts="-m ${range}" --exit-code 1 .
+          if [ -n "${PR_BASE}" ] && git cat-file -e "${PR_BASE}:.gitleaks.toml" 2>/dev/null; then
+            git show "${PR_BASE}:.gitleaks.toml" > "${RUNNER_TEMP}/base-gitleaks.toml"
+            echo "Scanning ${range} with the base branch's config"
+            "${RUNNER_TEMP}/gitleaks" git --no-banner --redact --config "${RUNNER_TEMP}/base-gitleaks.toml" \
+              --ignore-gitleaks-allow --log-opts="-m ${range}" --exit-code 1 .
+          fi
+
+  semgrep:
+    name: Semgrep
+    runs-on: ubuntu-latest
+    env:
+      SEMGREP_SEND_METRICS: "off"
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Semgrep
+        run: pip install --disable-pip-version-check --require-hashes -r .github/requirements/semgrep.txt
+
+      # Only findings the PR adds count. Inline `nosemgrep` comments do not
+      # hide them (--disable-nosem), .gitignore does not hide tracked files
+      # (--no-git-ignore), and only the base branch's root .semgrepignore is
+      # used: a PR could otherwise silence its own finding. A reviewed
+      # false positive is excluded in .semgrepignore by a separate PR.
+      - name: Semgrep (blocking on new ERROR findings)
+        run: |
+          set -euo pipefail
+          find . -name .semgrepignore -not -path './.git/*' -delete
+          if [ -n "${BASE_SHA}" ] && git cat-file -e "${BASE_SHA}:.semgrepignore" 2>/dev/null; then
+            git show "${BASE_SHA}:.semgrepignore" > .semgrepignore
+          fi
+          args=(scan --config p/typescript --config p/nodejs --config p/secrets
+                --metrics=off --disable-nosem --no-git-ignore --json-output "${RUNNER_TEMP}/semgrep.json")
+          if [ -n "${BASE_SHA}" ]; then args+=(--baseline-commit "${BASE_SHA}"); fi
+          semgrep "${args[@]}" > /dev/null
+          python3 - "${RUNNER_TEMP}/semgrep.json" <<'EOF'
+          import collections, json, os, sys
+          results = json.load(open(sys.argv[1]))["results"]
+          errors = [r for r in results if r["extra"]["severity"] == "ERROR"]
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
+              out.write("### Semgrep (new findings)\n\n")
+              if not results:
+                  out.write("No findings.\n")
+              else:
+                  out.write("| Severity | Rule | File |\n|---|---|---|\n")
+                  for r in results:
+                      rule = r["check_id"].rsplit(".", 1)[-1]
+                      out.write(f"| {r['extra']['severity']} | `{rule}` | `{r['path']}:{r['start']['line']}` |\n")
+          for r in errors:
+              print(f"::error file={r['path']},line={r['start']['line']}::{r['check_id']}: {r['extra']['message'][:200]}")
+          sys.exit(1 if errors and os.environ.get("BASE_SHA") else 0)
+          EOF
+
+  workflow-lint:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install actionlint and zizmor
+        run: |
+          set -euo pipefail
+          tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "${RUNNER_TEMP}/${tarball}" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${tarball}"
+          echo "${ACTIONLINT_SHA256}  ${RUNNER_TEMP}/${tarball}" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/${tarball}" -C "${RUNNER_TEMP}" actionlint
+          pip install --disable-pip-version-check --require-hashes -r .github/requirements/zizmor.txt
+
+      - name: actionlint (changed workflows)
+        run: |
+          set -euo pipefail
+          if [ -z "${BASE_SHA}" ]; then
+            mapfile -t changed < <(ls .github/workflows/*.yml .github/workflows/*.yaml 2>/dev/null)
+          else
+            mapfile -t changed < <(git diff --no-renames --name-only --diff-filter=d "${BASE_SHA}" HEAD -- \
+              '.github/workflows/*.yml' '.github/workflows/*.yaml')
+          fi
+          if [ "${#changed[@]}" -eq 0 ]; then echo "No workflow changes."; exit 0; fi
+          printf 'Checking %s\n' "${changed[@]}"
+          "${RUNNER_TEMP}/actionlint" -color "${changed[@]}"
+
+      # Report-only. Exit 0 is clean, 10-14 means findings by severity, and
+      # anything else is a tool failure, which must not read as "No findings".
+      - name: zizmor (report-only)
+        run: |
+          set -uo pipefail
+          rc=0
+          zizmor --offline --color never --format plain .github/workflows/ > zizmor.txt 2>&1 || rc=$?
+          {
+            echo "### zizmor (GitHub Actions audit)"
+            echo
+            echo '```'
+            if [ "${rc}" -eq 0 ]; then
+              echo "No findings."
+            elif [ "${rc}" -ge 10 ] && [ "${rc}" -le 14 ]; then
+              grep -E '^(error|warning|help|info)\[' zizmor.txt | sort | uniq -c | sort -rn
+              tail -n 1 zizmor.txt
+            else
+              echo "zizmor failed (exit ${rc}):"
+              tail -n 20 zizmor.txt
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${rc}" -ne 0 ] && { [ "${rc}" -lt 10 ] || [ "${rc}" -gt 14 ]; }; then
+            echo "::warning::zizmor failed with exit ${rc}; see the job summary"
+          fi
+
+  # New dependencies run on users' machines next to their wallet keys.
+  # Blocking on PRs: a new runtime dependency with a known high or critical
+  # vulnerability, or any new dependency that runs an install script.
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
+        with:
+          fail-on-severity: high
+          fail-on-scopes: runtime
+
+  install-scripts:
+    name: Install scripts
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22.x"
+
+      - name: No new dependency with an install script
+        run: |
+          set -euo pipefail
+          git show "${BASE_SHA}:package-lock.json" > "${RUNNER_TEMP}/base-lock.json" 2>/dev/null || echo '{}' > "${RUNNER_TEMP}/base-lock.json"
+          git show "${BASE_SHA}:.github/allowed-install-scripts.txt" > "${RUNNER_TEMP}/allowed.txt" 2>/dev/null || : > "${RUNNER_TEMP}/allowed.txt"
+          node .github/scripts/install-scripts.mjs "${RUNNER_TEMP}/base-lock.json" package-lock.json "${RUNNER_TEMP}/allowed.txt"
+
+  # What `npm publish` would ship: only package.json, README, LICENSE and
+  # dist/, no tests or env files, and no secrets in the built code.
+  package-contents:
+    name: Package contents
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22.x"
+
+      - name: Build
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx turbo run build
+
+      - name: Install Gitleaks
+        run: |
+          set -euo pipefail
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL -o "${RUNNER_TEMP}/${tarball}" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
+          echo "${GITLEAKS_SHA256}  ${RUNNER_TEMP}/${tarball}" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/${tarball}" -C "${RUNNER_TEMP}" gitleaks
+
+      - name: Check the packed files
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/packs"
+          mkdir -p "${out}/unpacked"
+          for pkg in packages/*/; do
+            (cd "${pkg}" && npm pack --ignore-scripts --json --pack-destination "${out}") > "${out}/$(basename "${pkg}").json"
+          done
+          node -e 'const fs=require("fs");const d=process.argv[1];const all=fs.readdirSync(d).filter(f=>f.endsWith(".json")).flatMap(f=>JSON.parse(fs.readFileSync(d+"/"+f,"utf8")));fs.writeFileSync(d+"/all.json",JSON.stringify(all));' "${out}"
+          node .github/scripts/pack-check.mjs "${out}/all.json"
+          for tgz in "${out}"/*.tgz; do
+            mkdir -p "${out}/unpacked/$(basename "${tgz}" .tgz)"
+            tar -xzf "${tgz}" -C "${out}/unpacked/$(basename "${tgz}" .tgz)"
+          done
+          # Same rules as the commit scan: no inline or file-based allows.
+          find . "${out}/unpacked" -name .gitleaksignore -not -path './.git/*' -delete
+          "${RUNNER_TEMP}/gitleaks" dir --no-banner --redact --config .gitleaks.toml --ignore-gitleaks-allow \
+            --exit-code 1 "${out}/unpacked"
+          # Again with the base branch's config, so a PR cannot widen the
+          # allowlist to pass its own check.
+          if [ -n "${BASE_SHA}" ] && git cat-file -e "${BASE_SHA}:.gitleaks.toml" 2>/dev/null; then
+            git show "${BASE_SHA}:.gitleaks.toml" > "${RUNNER_TEMP}/base-gitleaks.toml"
+            "${RUNNER_TEMP}/gitleaks" dir --no-banner --redact --config "${RUNNER_TEMP}/base-gitleaks.toml" \
+              --ignore-gitleaks-allow --exit-code 1 "${out}/unpacked"
+          fi
+
+  dependency-audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22.x"
+
+      # Report-only: the summary shows the counts and the job never fails.
+      - name: npm audit (production dependencies)
+        run: |
+          set -uo pipefail
+          npm audit --package-lock-only --omit=dev --json > audit.json || true
+          node .github/scripts/audit-summary.mjs "npm audit (production dependencies)" audit.json >> "$GITHUB_STEP_SUMMARY"
