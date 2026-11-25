@@ -14,7 +14,7 @@
   },
   "devDependencies": {
     "@ai-sdk/anthropic": "^3.0.69",
-    "turbo": "^2.4.0",
+    "turbo": "^2.9.14",
     "typescript": "^5.7.0"
   }
 }
