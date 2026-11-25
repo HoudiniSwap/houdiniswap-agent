@@ -2,7 +2,7 @@
   "name": "houdiniswap",
   "displayName": "HoudiniSwap Swap Agent",
   "description": "Discover, quote, and execute crypto swaps across 14 CEXes and 20+ DEXes via HoudiniSwap, with x402 pay-per-call (USDC on Base or Solana — no signup).",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "author": {
     "name": "HoudiniSwap",
     "url": "https://houdini.com"
@@ -43,7 +43,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@houdiniswap/mcp-server@0.1.22"
+        "@houdiniswap/mcp-server@0.1.23"
       ],
       "env": {
         "HOUDINI_X402_PRIVATE_KEY": "${user_config.x402_private_key}",

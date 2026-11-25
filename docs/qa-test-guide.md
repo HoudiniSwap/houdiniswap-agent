@@ -6,8 +6,8 @@ literally.
 
 | | |
 |---|---|
-| `@houdiniswap/mcp-server` | 0.1.22 |
-| plugin | 0.1.16 |
+| `@houdiniswap/mcp-server` | 0.1.23 |
+| plugin | 0.1.17 |
 | tools | 16 |
 | network | Base (`eip155:8453`) or Solana (`solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`) |
 
