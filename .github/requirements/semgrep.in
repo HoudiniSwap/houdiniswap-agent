@@ -1,5 +1,4 @@
-# 1.137.0 updates OpenTelemetry to stop importing the removed pkg_resources.
-semgrep==1.137.0
+# 1.137.0+ updates OpenTelemetry to stop importing the removed pkg_resources.
+# 1.187.0 pins mcp 1.29.0, which no longer needs the pydantic<2.14 cap.
+semgrep==1.187.0
 setuptools>=84.1.0,<85
-# Semgrep's pinned MCP SDK imports eval_type_backport, removed in Pydantic 2.14.
-pydantic<2.14
