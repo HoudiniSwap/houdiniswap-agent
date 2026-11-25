@@ -41,7 +41,7 @@ WALLET_KEY=0x... ANTHROPIC_API_KEY=sk-ant-... npx tsx examples/swap-agent.ts "Sw
 
 Notes:
 - `npm run lint` is wired in turbo but **no package defines a `lint` script** — it's currently a no-op. Type-checking happens only through `tsc` during `build`. There is no separate typecheck/format step.
-- CI (`.github/workflows/ci.yml`) runs `npx turbo run build` then `npx turbo run test` on Node 20.
+- CI (`.github/workflows/ci.yml`) runs `npx turbo run build` then `npx turbo run test` on Node 22. vitest 5 needs Node ^22.12 or ^24, so the tests don't start on Node 20.
 
 ## Architecture
 
