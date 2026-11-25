@@ -25,6 +25,7 @@ const SERVER = path.resolve(
 );
 
 let child: ChildProcess;
+let stderr = "";
 
 const post = async (body: unknown) => {
     const res = await fetch(`http://${HOST}:${PORT}/mcp`, {
@@ -51,6 +52,7 @@ beforeAll(async () => {
     await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error("server did not start in time")), 20_000);
         child.stderr?.on("data", (d: Buffer) => {
+            stderr += d.toString();
             if (d.toString().includes("listening on")) {
                 clearTimeout(timer);
                 resolve();
@@ -138,6 +140,41 @@ describe("HTTP transport hardening", () => {
     // GET opened a notification stream the SDK never closed, pinning the
     // per-request server for as long as the socket was held. 181 idle GETs
     // OOM-killed the process, unauthenticated.
+    // express.json() rejects these before any route runs. Its default handler
+    // answered with an HTML page that, outside NODE_ENV=production, carried the
+    // stack trace and the absolute paths of this machine's files.
+    const postRaw = async (body: string) => {
+        const res = await fetch(`http://${HOST}:${PORT}/mcp`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+            body,
+        });
+        return { status: res.status, type: res.headers.get("content-type") ?? "", text: await res.text() };
+    };
+
+    it("answers a malformed body with a JSON-RPC parse error, not a stack trace", async () => {
+        const { status, type, text } = await postRaw('{"jsonrpc":');
+        expect(status).toBe(400);
+        expect(type).toMatch(/application\/json/);
+        expect(JSON.parse(text)).toEqual({
+            jsonrpc: "2.0",
+            error: { code: -32700, message: "Parse error: the request body is not valid JSON." },
+            id: null,
+        });
+        expect(text).not.toContain(path.sep + "node_modules");
+        expect(stderr).toMatch(/MCP request rejected: .*JSON/);
+    });
+
+    it("answers an oversize body with 413 and a JSON-RPC error, not a stack trace", async () => {
+        const { status, type, text } = await postRaw(JSON.stringify({ pad: "a".repeat(200_000) }));
+        expect(status).toBe(413);
+        expect(type).toMatch(/application\/json/);
+        const body = JSON.parse(text);
+        expect(body.error.code).toBe(-32600);
+        expect(body.id).toBeNull();
+        expect(text).not.toContain(path.sep + "node_modules");
+    });
+
     it("refuses GET rather than opening a stream it never closes", async () => {
         const res = await fetch(`http://${HOST}:${PORT}/mcp`, {
             method: "GET",
