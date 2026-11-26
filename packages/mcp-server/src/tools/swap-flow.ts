@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { HoudiniClient, TokenResult, Token, QuoteResult, Order, MinMaxResult } from "@houdiniswap/agent-shared";
+import { ACCEPT_RISK_DESCRIPTION, checkSwapTokens, swapRiskConfirmation } from "@houdiniswap/agent-shared";
 import { z } from "zod";
 import { asToolResult } from "../shape.js";
 
@@ -11,23 +12,10 @@ import { asToolResult } from "../shape.js";
 const pickToken = (tokens?: Token[]): Token | undefined =>
     tokens?.find(t => t.mainnet) ?? tokens?.[0];
 
-type Scan = { resultType?: unknown };
-
-const saysMalicious = (scan: unknown): boolean => {
-    const resultType = (scan as Scan | undefined)?.resultType;
-    return typeof resultType === "string" && resultType.toLowerCase() === "malicious";
-};
-
-// Either source is enough. The quote's verdict can be a temporary "Unscanned"
-// (the screen timed out), which must not hide a "Malicious" verdict already
-// stored on the token.
-const isMalicious = (quoteScan: unknown, token: Token): boolean =>
-    saysMalicious(quoteScan) || saysMalicious((token as Token & { securityScan?: unknown }).securityScan);
-
 export const registerSwapFlowTool = (server: McpServer, client: HoudiniClient) => {
     server.tool(
         "swap",
-        "Execute a complete swap flow: find tokens by symbol, validate amount, get the best quote, and create the exchange order. Returns the order with deposit address. Use this for a simple end-to-end CEX swap.",
+        "Execute a complete swap flow: find tokens by symbol, validate amount, get the best quote, and create the exchange order. Returns the order with deposit address. Use this for a simple end-to-end CEX swap. If a token security scan flags either token, no order is created: the tool returns confirmationRequired with a warning to show the user, as app.houdini.com does.",
         {
             fromSymbol: z.string().describe("Source token symbol (e.g. 'BTC', 'ETH')"),
             fromChain: z.string().describe("Source chain (e.g. 'bitcoin', 'ethereum')"),
@@ -35,8 +23,9 @@ export const registerSwapFlowTool = (server: McpServer, client: HoudiniClient) =
             toChain: z.string().describe("Destination chain (e.g. 'ethereum', 'tron')"),
             amount: z.number().positive().describe("Amount to swap in source token units"),
             addressTo: z.string().describe("Destination wallet address"),
+            acceptRiskTokenIds: z.array(z.string()).optional().describe(ACCEPT_RISK_DESCRIPTION),
         },
-        async ({ fromSymbol, fromChain, toSymbol, toChain, amount, addressTo }) => {
+        async ({ fromSymbol, fromChain, toSymbol, toChain, amount, addressTo, acceptRiskTokenIds }) => {
             try {
                 // Step 1: Find source and destination tokens in parallel
                 const [fromTokens, toTokens] = await Promise.all([
@@ -100,23 +89,20 @@ export const registerSwapFlowTool = (server: McpServer, client: HoudiniClient) =
 
                 const bestQuote = cexQuotes[0];
 
-                // The API never refuses a flagged token; the skill asks the agent
-                // to, but this tool creates the order in the same call, so the
-                // agent never gets the chance. Refuse here and leave an explicit
-                // override to the step-by-step flow.
-                const scans = quoteResult as QuoteResult & { fromTokenScan?: unknown; toTokenScan?: unknown };
-                const flagged = [
-                    isMalicious(scans.fromTokenScan, fromToken) ? `${fromSymbol} on ${fromChain}` : undefined,
-                    isMalicious(scans.toTokenScan, toToken) ? `${toSymbol} on ${toChain}` : undefined,
-                ].filter(Boolean);
-                if (flagged.length) {
+                // The API never refuses a flagged token, and this tool creates the
+                // order in the same call, so the agent never sees the verdict
+                // before it. Stop where app.houdini.com shows its popup, and go on
+                // only for the tokens the user accepted.
+                const { flagged, unaccepted } = checkSwapTokens(
+                    [
+                        { token: fromToken, quoteScan: quoteResult.fromTokenScan, label: `${fromSymbol} on ${fromChain}` },
+                        { token: toToken, quoteScan: quoteResult.toTokenScan, label: `${toSymbol} on ${toChain}` },
+                    ],
+                    acceptRiskTokenIds,
+                );
+                if (unaccepted.length) {
                     return {
-                        content: [{
-                            type: "text",
-                            text: JSON.stringify({
-                                error: `No order created: ${flagged.join(" and ")} was flagged as Malicious by a token security scan. Swapping it is very likely to lose funds. Tell the user; if they explicitly insist on this exact token, use getQuote and createExchange instead.`,
-                            }),
-                        }],
+                        content: [{ type: "text", text: JSON.stringify(swapRiskConfirmation(unaccepted)) }],
                         isError: true,
                     };
                 }
@@ -137,6 +123,9 @@ export const registerSwapFlowTool = (server: McpServer, client: HoudiniClient) =
 
                 return asToolResult({
                     success: true,
+                    // Accepted by the user; repeated so the order is never shown
+                    // without its warning.
+                    ...(flagged.length ? { acceptedRisks: flagged.map(f => ({ token: f.token, variant: f.variant, flags: f.flags })) } : {}),
                     order: {
                         houdiniId: order.houdiniId,
                         status: order.status,

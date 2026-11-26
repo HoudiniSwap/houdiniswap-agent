@@ -208,7 +208,7 @@ describe("swap composite on an unexpected envelope", () => {
 describe("swap composite and token security verdicts", () => {
     const BTC = { id: "btc", symbol: "BTC", mainnet: true };
     const ETH = { id: "eth", symbol: "ETH", mainnet: true };
-    const drive = async (opts: { quoteScans?: Record<string, unknown>; ethScan?: unknown }) => {
+    const drive = async (opts: { quoteScans?: Record<string, unknown>; ethScan?: unknown; acceptRiskTokenIds?: string[] }) => {
         const posts: string[] = [];
         const client = {
             get: async (path: string, params: Record<string, unknown>) => {
@@ -236,27 +236,52 @@ describe("swap composite and token security verdicts", () => {
         await c.connect(ct);
         const res = await c.callTool({
             name: "swap",
-            arguments: { fromSymbol: "BTC", fromChain: "bitcoin", toSymbol: "ETH", toChain: "ethereum", amount: 1, addressTo: "0xabc" },
+            arguments: {
+                fromSymbol: "BTC", fromChain: "bitcoin", toSymbol: "ETH", toChain: "ethereum", amount: 1, addressTo: "0xabc",
+                ...(opts.acceptRiskTokenIds ? { acceptRiskTokenIds: opts.acceptRiskTokenIds } : {}),
+            },
         });
         await c.close();
         return { res, out: JSON.parse((res.content as Array<{ text: string }>)[0].text), posts };
     };
 
-    it("refuses a token the quote flags as Malicious and creates no order", async () => {
+    it("stops on a token the quote flags as Malicious and asks the user to accept the risk", async () => {
         const { res, out, posts } = await drive({ quoteScans: { toTokenScan: { resultType: "Malicious" } } });
         expect(res.isError).toBe(true);
+        expect(out.confirmationRequired).toBe(true);
         expect(out.error).toContain("ETH on ethereum");
-        expect(out.error).toContain("Malicious");
+        expect(out.acceptRiskTokenIds).toEqual(["eth"]);
+        expect(out.flaggedTokens[0].warning).toContain("Malicious token detected");
+        expect(posts).toEqual([]);
+    });
+
+    it("creates the order once the user accepted the flagged token, and repeats the warning", async () => {
+        const { res, out, posts } = await drive({
+            quoteScans: { toTokenScan: { resultType: "Malicious" } },
+            acceptRiskTokenIds: ["eth"],
+        });
+        expect(res.isError).toBeFalsy();
+        expect(out.success).toBe(true);
+        expect(out.acceptedRisks).toEqual([{ token: "ETH on ethereum", variant: "malicious", flags: [] }]);
+        expect(posts).toEqual(["/exchanges"]);
+    });
+
+    it("does not take an acceptance for a different token", async () => {
+        const { out, posts } = await drive({
+            quoteScans: { toTokenScan: { resultType: "Malicious" } },
+            acceptRiskTokenIds: ["btc"],
+        });
+        expect(out.confirmationRequired).toBe(true);
         expect(posts).toEqual([]);
     });
 
     it("falls back to the token's stored verdict when the quote has none", async () => {
         const { out, posts } = await drive({ ethScan: { resultType: "Malicious" } });
-        expect(out.error).toContain("Malicious");
+        expect(out.confirmationRequired).toBe(true);
         expect(posts).toEqual([]);
     });
 
-    it("refuses when the stored verdict is Malicious, whatever the quote says", async () => {
+    it("stops when the stored verdict is Malicious, whatever the quote says", async () => {
         for (const resultType of ["Unscanned", "Benign"]) {
             const { out, posts } = await drive({
                 ethScan: { resultType: "Malicious" },
@@ -273,10 +298,19 @@ describe("swap composite and token security verdicts", () => {
         expect(posts).toEqual([]);
     });
 
-    it("still swaps a Warning token (only Malicious is refused)", async () => {
-        const { out, posts } = await drive({ quoteScans: { fromTokenScan: { resultType: "Warning" } } });
-        expect(out.success).toBe(true);
-        expect(posts).toEqual(["/exchanges"]);
+    it("stops on a Warning token only when the site would show its popup", async () => {
+        const shown = await drive({
+            quoteScans: { fromTokenScan: { resultType: "Warning", features: [{ featureId: "HONEYPOT" }] } },
+        });
+        expect(shown.out.confirmationRequired).toBe(true);
+        expect(shown.out.flaggedTokens[0]).toMatchObject({ tokenId: "btc", variant: "warning", flags: ["Honeypot risk"] });
+        expect(shown.posts).toEqual([]);
+
+        const silent = await drive({
+            quoteScans: { fromTokenScan: { resultType: "Warning", features: [{ featureId: "SOMETHING_THE_SITE_HIDES" }] } },
+        });
+        expect(silent.out.success).toBe(true);
+        expect(silent.posts).toEqual(["/exchanges"]);
     });
 });
 
