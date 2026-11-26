@@ -4,3 +4,5 @@ export { createX402Fetch, isSvmSecretKey, isX402Network, X402PaymentUnconfirmedE
 export type { X402Keys, X402Options } from "./x402.js";
 export type * from "./types.js";
 export { DEFAULT_X402_PAY_TO } from "./x402.js";
+export { tokenSecurityDisplay, checkSwapTokens, swapRiskConfirmation, ACCEPT_RISK_DESCRIPTION } from "./tokenSecurity.js";
+export type { TokenSecurityDisplay, TokenSecurityVariant, FlaggedToken, SwapTokenCheck } from "./tokenSecurity.js";

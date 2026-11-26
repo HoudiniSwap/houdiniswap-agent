@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ACCEPT_RISK_DESCRIPTION } from "@houdiniswap/agent-shared";
 
 export const tokensSchema = z.object({
     symbol: z.string().optional().describe("Exact symbol match (e.g. 'BTC', 'ETH', 'USDC')"),
@@ -135,4 +136,5 @@ export const swapSchema = z.object({
     toChain: z.string().describe("Destination chain (e.g. 'ethereum', 'tron')"),
     amount: z.number().positive().describe("Amount to swap in source token units"),
     addressTo: z.string().describe("Destination wallet address"),
+    acceptRiskTokenIds: z.array(z.string()).optional().describe(ACCEPT_RISK_DESCRIPTION),
 });

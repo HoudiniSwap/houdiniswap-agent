@@ -6,8 +6,8 @@ literally.
 
 | | |
 |---|---|
-| `@houdiniswap/mcp-server` | 0.1.23 |
-| plugin | 0.1.17 |
+| `@houdiniswap/mcp-server` | 0.1.24 |
+| plugin | 0.1.18 |
 | tools | 16 |
 | network | Base (`eip155:8453`) or Solana (`solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`) |
 
@@ -415,6 +415,9 @@ Use the composite `swap` tool for a simple CEX swap.
 - **Known limitation:** it deliberately skips the route menu, the unverified-token
   warning and the price-impact check, and may pick a *private* route. Documented
   behaviour — worth confirming, not filing.
+- **Also check:** ask it to swap a token the security scan flags as Malicious. It
+  must create no order and show the same warning as app.houdini.com, then create
+  the order only after you explicitly accept the risk. Saying no leaves no order.
 - **Known good:** 0.006 ETH → USDC on Base via ChangeNow, FINISHED in ~2 min.
 
 #### T16 — Cross-chain DEX **[funds]**

@@ -9,6 +9,7 @@ import type {
     MinMaxResult,
     SwapProvider,
 } from "@houdiniswap/agent-shared";
+import { checkSwapTokens, swapRiskConfirmation } from "@houdiniswap/agent-shared";
 import {
     tokensSchema,
     chainsSchema,
@@ -108,9 +109,9 @@ export const createTools = (client: HoudiniClient) => ({
 
     swap: tool({
         description:
-            "Execute a complete swap: find tokens by symbol, validate amount, get the best quote, and create the exchange order. Returns the order with deposit address. CEX swaps only.",
+            "Execute a complete swap: find tokens by symbol, validate amount, get the best quote, and create the exchange order. Returns the order with deposit address. CEX swaps only. If a token security scan flags either token, no order is created: the tool returns confirmationRequired with a warning to show the user, as app.houdini.com does.",
         inputSchema: swapSchema,
-        execute: async ({ fromSymbol, fromChain, toSymbol, toChain, amount, addressTo }) => {
+        execute: async ({ fromSymbol, fromChain, toSymbol, toChain, amount, addressTo, acceptRiskTokenIds }) => {
             // Step 1: Find source and destination tokens in parallel
             const [fromTokens, toTokens] = await Promise.all([
                 client.get<TokenResult>("/tokens", { symbol: fromSymbol, chain: fromChain, hasCex: true, pageSize: 5 }),
@@ -146,6 +147,19 @@ export const createTools = (client: HoudiniClient) => ({
             if (!cexQuotes.length) return { error: "No CEX quotes available for this pair" };
             const bestQuote = cexQuotes[0];
 
+            // The API never refuses a flagged token, and this tool creates the
+            // order in the same call, so the agent never sees the verdict
+            // before it. Stop where app.houdini.com shows its popup, and go on
+            // only for the tokens the user accepted.
+            const { flagged, unaccepted } = checkSwapTokens(
+                [
+                    { token: fromToken, quoteScan: quoteResult.fromTokenScan, label: `${fromSymbol} on ${fromChain}` },
+                    { token: toToken, quoteScan: quoteResult.toTokenScan, label: `${toSymbol} on ${toChain}` },
+                ],
+                acceptRiskTokenIds,
+            );
+            if (unaccepted.length) return swapRiskConfirmation(unaccepted);
+
             // Step 4: Create exchange
             const order = await client.post<Order>("/exchanges", {
                 quoteId: bestQuote.quoteId,
@@ -157,6 +171,9 @@ export const createTools = (client: HoudiniClient) => ({
 
             return {
                 success: true,
+                // Accepted by the user; repeated so the order is never shown
+                // without its warning.
+                ...(flagged.length ? { acceptedRisks: flagged.map(f => ({ token: f.token, variant: f.variant, flags: f.flags })) } : {}),
                 order: {
                     houdiniId: order.houdiniId,
                     status: order.status,

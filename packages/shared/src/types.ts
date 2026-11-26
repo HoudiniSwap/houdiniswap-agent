@@ -84,6 +84,21 @@ export interface Token {
     price?: number;
     icon?: string;
     chainData?: ChainData;
+    /** The token security verdict stored on the token. */
+    securityScan?: TokenSecurityScan;
+}
+
+export interface TokenScanFeature {
+    featureId?: string;
+    type?: string;
+    description?: string;
+}
+
+/** A token security verdict: `resultType` is Benign, Warning, Malicious or Unscanned. */
+export interface TokenSecurityScan {
+    resultType: string;
+    features?: TokenScanFeature[];
+    expiresAt?: string;
 }
 
 export interface ChainResult {
@@ -120,6 +135,9 @@ export interface SwapProvider {
 
 export interface QuoteResult {
     quotes: Quote[];
+    /** The verdicts on the quoted tokens, screened for this quote. */
+    fromTokenScan?: TokenSecurityScan;
+    toTokenScan?: TokenSecurityScan;
 }
 
 export interface Quote {

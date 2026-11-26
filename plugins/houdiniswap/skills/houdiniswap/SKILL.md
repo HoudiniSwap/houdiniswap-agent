@@ -202,7 +202,7 @@ Partner, `sxff` FixedFloat (CEX); `un` Uniswap, `jp` Jupiter, `rd` Raydium, `ps`
 ### Composite
 | Tool | Description |
 |------|-------------|
-| `swap` | One-step CEX swap. Params: `fromSymbol`, `fromChain`, `toSymbol`, `toChain`, `amount`, `addressTo`. Finds tokens, validates amount, gets best quote, creates exchange. |
+| `swap` | One-step CEX swap. Params: `fromSymbol`, `fromChain`, `toSymbol`, `toChain`, `amount`, `addressTo`, optional `acceptRiskTokenIds`. Finds tokens, validates amount, gets best quote, creates exchange. Returns `confirmationRequired` instead of an order when a token security scan flags a token (see below). |
 
 ## Workflows
 
@@ -334,13 +334,20 @@ swap({
 
 > ⚠️ **`swap` is exempt from Critical Rules 5-7 and can create a private order.**
 > It picks the token and the route itself and creates the order in a single call,
-> so there is no menu, no unverified-token or `Warning`-verdict warning and no price-impact check
-> (it does refuse a token whose verdict is `Malicious`) — and
+> so there is no menu, no unverified-token warning and no price-impact check — and
 > it returns neither `amountOutUsd` (so impact cannot be computed after the fact)
 > nor `displayStatus` (only the numeric `status`). It also quotes without a
 > `types` filter and takes the best non-DEX route, so **if a private route wins it
 > creates an anonymous 2-hop order without asking.** Use the step-by-step flow
 > whenever the user has not explicitly accepted those trade-offs.
+>
+> **`swap` does stop on a flagged token, as app.houdini.com does:** always on
+> `Malicious`, and on `Warning` when the site would show its popup. It then creates
+> no order and returns `confirmationRequired: true`, a `warning` for each token in
+> `flaggedTokens`, and `acceptRiskTokenIds`. Show every `warning` to the user and ask
+> whether they accept the risk. Only if they explicitly accept it, call `swap` again
+> with the same arguments and `acceptRiskTokenIds` set to the ids it returned. Never
+> pass `acceptRiskTokenIds` on a first call or on a vague "ok".
 
 ## Safety Warnings
 
@@ -369,7 +376,8 @@ verbatim before the route menu. Branch on `resultType` only:
   ```
   Only continue if the user, having seen this, explicitly insists on swapping
   this exact token. Never continue on a vague "ok" or because the user asked
-  for the swap earlier.
+  for the swap earlier. With `swap`, continuing means calling it again with
+  `acceptRiskTokenIds`.
 - **`Warning`** — warn before the route menu and require acknowledgment:
   ```
   ⚠️ {symbol} on {chain} has security warnings ({featureIds}). Check the

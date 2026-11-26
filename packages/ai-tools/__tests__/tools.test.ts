@@ -299,5 +299,53 @@ describe("AI SDK tools", () => {
             );
             expect((result as any).error).toContain("No CEX quotes");
         });
+
+        describe("token security verdicts", () => {
+            const args = {
+                fromSymbol: "SCAM",
+                fromChain: "ethereum",
+                toSymbol: "USDC",
+                toChain: "ethereum",
+                amount: 1,
+                addressTo: "0xabc",
+            };
+            const setup = (quoteExtras: Record<string, unknown>) => {
+                mockClient.mockGet("/tokens", { total: 1, tokens: [{ id: "scam-id", symbol: "SCAM", chain: "ethereum" }] });
+                mockClient.mockGet("/minMax", { cex: { min: 0.001, max: 100 } });
+                mockClient.mockGet("/quotes", {
+                    quotes: [{ quoteId: "q1", swapName: "X", type: "standard", amountOut: 2 }],
+                    ...quoteExtras,
+                });
+                mockClient.mockPost("/exchanges", { houdiniId: "H1", status: 0, depositAddress: "0xdeposit" });
+            };
+            const posted = () => mockClient.calls.filter((c) => c.method === "POST");
+
+            it("creates no order for a Malicious token until the user accepts the risk", async () => {
+                setup({ fromTokenScan: { resultType: "Malicious" } });
+                const result = (await tools.swap.execute(args, { toolCallId: "t1", messages: [] })) as any;
+                expect(result.confirmationRequired).toBe(true);
+                expect(result.acceptRiskTokenIds).toEqual(["scam-id"]);
+                expect(result.flaggedTokens[0].warning).toContain("Malicious token detected");
+                expect(posted()).toEqual([]);
+            });
+
+            it("creates the order once the flagged token is accepted", async () => {
+                setup({ fromTokenScan: { resultType: "Malicious" } });
+                const result = (await tools.swap.execute(
+                    { ...args, acceptRiskTokenIds: ["scam-id"] },
+                    { toolCallId: "t1", messages: [] },
+                )) as any;
+                expect(result.success).toBe(true);
+                expect(result.acceptedRisks[0].variant).toBe("malicious");
+                expect(posted().map((c) => c.path)).toEqual(["/exchanges"]);
+            });
+
+            it("lets a Warning without a listed finding through, as the site does", async () => {
+                setup({ toTokenScan: { resultType: "Warning", features: [{ featureId: "UNLISTED" }] } });
+                const result = (await tools.swap.execute(args, { toolCallId: "t1", messages: [] })) as any;
+                expect(result.success).toBe(true);
+                expect(result.acceptedRisks).toBeUndefined();
+            });
+        });
     });
 });
