@@ -88,24 +88,37 @@ export const tokenSecurityDisplay = (scan: unknown): TokenSecurityDisplay | null
             if (typeof id === "string") found.add(id);
         }
     }
-    // Confidence variants of one finding share a label: list it once.
-    const flags = [...new Set(SHOWN_FEATURES.filter(([id]) => found.has(id)).map(([, label]) => label))].slice(0, MAX_FLAGS);
+    // Confidence variants of one finding (IMPERSONATOR, IMPERSONATOR_HIGH_CONFIDENCE…)
+    // share one slot, shown as the most severe of them.
+    const groups = new Set<string>();
+    const flags: string[] = [];
+    for (const [id, label] of SHOWN_FEATURES) {
+        if (!found.has(id)) continue;
+        const group = id.replace(/_(HIGH|MEDIUM|LOW)_CONFIDENCE$/, "");
+        if (groups.has(group)) continue;
+        groups.add(group);
+        flags.push(label);
+    }
+    flags.splice(MAX_FLAGS);
 
     if (!malicious && flags.length === 0) return null;
     return { variant: malicious ? "malicious" : "warning", flags };
 };
 
 /**
- * The stricter of the quote's verdict and the one stored on the token. The
- * quote's can be a temporary "Unscanned" (the screen timed out), which must not
- * hide a verdict already stored on the token.
+ * The quote's verdict is screened for this swap, so it decides. The verdict
+ * stored on the token counts only where the quote has none or a temporary
+ * "Unscanned" (the screen timed out), and a stored Malicious always counts: an
+ * Unscanned or a missing quote verdict must not hide it.
  */
-const strictestDisplay = (quoteScan: unknown, token: Token): TokenSecurityDisplay | null => {
+const swapDisplay = (quoteScan: unknown, token: Token): TokenSecurityDisplay | null => {
     const fromQuote = tokenSecurityDisplay(quoteScan);
     const stored = tokenSecurityDisplay(token.securityScan);
     if (fromQuote?.variant === "malicious") return fromQuote;
     if (stored?.variant === "malicious") return stored;
-    return fromQuote ?? stored;
+    const quoteType = resultTypeOf(quoteScan);
+    const quoteScreened = quoteType !== undefined && quoteType !== "unscanned";
+    return quoteScreened ? fromQuote : stored;
 };
 
 const warningText = (label: string, display: TokenSecurityDisplay): string => {
@@ -125,7 +138,7 @@ export const checkSwapTokens = (
 ): { flagged: FlaggedToken[]; unaccepted: FlaggedToken[] } => {
     const flagged: FlaggedToken[] = [];
     for (const { token, quoteScan, label } of tokens) {
-        const display = strictestDisplay(quoteScan, token);
+        const display = swapDisplay(quoteScan, token);
         if (!display) continue;
         flagged.push({
             tokenId: token.id,

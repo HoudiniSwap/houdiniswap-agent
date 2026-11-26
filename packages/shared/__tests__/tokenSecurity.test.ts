@@ -41,6 +41,15 @@ describe("tokenSecurityDisplay (the site's popup rule)", () => {
         });
         expect(display?.flags).toEqual(["Honeypot risk", "Impersonates other token", "Sniped at mint"]);
     });
+
+    it("shows confidence variants of one finding once, as the most severe", () => {
+        // Seen on a real token: the site shows only "Impersonates other token".
+        const display = tokenSecurityDisplay({
+            resultType: "Malicious",
+            features: [{ featureId: "IMPERSONATOR_MEDIUM_CONFIDENCE" }, { featureId: "IMPERSONATOR" }],
+        });
+        expect(display?.flags).toEqual(["Impersonates other token"]);
+    });
 });
 
 describe("checkSwapTokens", () => {
@@ -49,6 +58,15 @@ describe("checkSwapTokens", () => {
             { token: token("eth", { resultType: "Malicious" }), quoteScan: { resultType: "Unscanned" }, label: "ETH on ethereum" },
         ]);
         expect(unaccepted.map(f => f.variant)).toEqual(["malicious"]);
+    });
+
+    it("lets the quote's fresh verdict clear a stored Warning, but not a stored Malicious", () => {
+        const storedWarning = token("w", { resultType: "Warning", features: [{ featureId: "HONEYPOT" }] });
+        expect(checkSwapTokens([{ token: storedWarning, quoteScan: { resultType: "Benign" }, label: "W" }]).flagged).toEqual([]);
+        expect(checkSwapTokens([{ token: storedWarning, quoteScan: { resultType: "Unscanned" }, label: "W" }]).flagged).toHaveLength(1);
+        expect(checkSwapTokens([{ token: storedWarning, label: "W" }]).flagged).toHaveLength(1);
+        const storedMalicious = token("m", { resultType: "Malicious" });
+        expect(checkSwapTokens([{ token: storedMalicious, quoteScan: { resultType: "Benign" }, label: "M" }]).flagged).toHaveLength(1);
     });
 
     it("lists accepted tokens as flagged but not as unaccepted", () => {
